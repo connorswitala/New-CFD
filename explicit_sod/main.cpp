@@ -13,7 +13,7 @@ constexpr double R = 287.0;
 void primtocons(double* U, const double* V) {
     U[0] = V[0];
     U[1] = V[0] * V[1]; 
-    U[2] = V[2] / (gam - 1) + V[0] / 2 * (V[1] * V[1]); 
+    U[2] = V[2] / (gam - 1) + 0.5 * V[0] * (V[1] * V[1]); 
 }
 void constoprim(double* V, const double* U) {
     V[0] = U[0];
@@ -22,6 +22,9 @@ void constoprim(double* V, const double* U) {
 }
 inline double computeInternalEnergy(const double* U) {
     return U[2] / U[0] - 0.5 * (U[1] * U[1] / (U[0] * U[0]));
+}
+inline double computePressure(const double* U) {
+    return (U[2] - 0.5 * U[0] * (U[1] * U[1] / (U[0] * U[0]))) * (gam - 1); 
 }
 void write_U_to_csv(const Vector& U, int Nx, const string filename) {
 
@@ -32,14 +35,16 @@ void write_U_to_csv(const Vector& U, int Nx, const string filename) {
         std::cerr << "errno = " << errno << " (" << std::strerror(errno) << ")\n";
     }
   
-    file << "rho,momentum,energy\n";
+    file << "rho,u,p\n";
+    Vector V(3, 0.0); 
 
     for (int i = 0; i < Nx + 2; ++i) {
-        int idx = i * 3;
-        double rho     = U[idx + 0];
-        double mom     = U[idx + 1];
-        double energy  = U[idx + 2];
-        file << rho << ',' << mom << ',' << energy << '\n';
+        int idx = i * 3; 
+        constoprim(V.data(), &U[idx]);
+        double rho = V[0]; 
+        double u = V[1];
+        double p = V[2];
+        file << rho << ',' << u << ',' << p << '\n';
     }
 
     file.close();
@@ -69,167 +74,155 @@ double compute_max_dt(const std::vector<double>& U, int Nx, double dx, double cf
     return cfl * min_dt;
 }
 
-int main(int argc, char** argv) {
 
-    // MPI_Init(&argc, &argv);
-    // int rank, size;
-    // MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    // MPI_Comm_size(MPI_COMM_WORLD, &size);
+int main(int argc, char* argv[]) {
+    
+    MPI_Init(&argc, &argv);
+
+    double start_time = MPI_Wtime(); 
+    
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
 
     int counter = 0;
-    const int Nx = 10000;
+    int Nx_total = 24000;
     const int n = 3;
-    
+    const double CFL = 0.9;
 
-    Vector A_plus( (Nx + 1) * n * n, 0.0);
-    Vector A_minus( (Nx + 1) * n * n, 0.0);
-    Vector Flux((Nx + 1) * n, 0.0);
-    Vector F_plus((Nx + 1) * n, 0.0);
-    Vector F_minus((Nx + 1) * n, 0.0); 
-    Vector U((Nx + 2) * n, 0.0); 
+    if (argc >= 2) {
+        Nx_total = std::stoi(argv[1]);  // get number of cells from command line
+        if (rank == 0) cout << "Nx = " << Nx_total << endl;
+    }
 
-    double L = 2.0;
-    double S = L / (Nx - 1); 
+    int Nx_local = Nx_total / size;
+    int start = rank * Nx_local;
+    int end = (rank == size - 1) ? Nx_total : (rank + 1) * Nx_local;
 
-    Vector V(n, 0.0);
+    Vector U((Nx_local + 2) * n, 0.0);
+    Vector Flux((Nx_local + 1) * n, 0.0);
+    Vector F_plus((Nx_local + 1) * n, 0.0);
+    Vector F_minus((Nx_local + 1) * n, 0.0);
+    Vector A_plus((Nx_local + 1) * n * n, 0.0);
+    Vector A_minus((Nx_local + 1) * n * n, 0.0);
+
+    Vector V(n, 0.0), V1(n), V2(n), Q(n), W(n);
+    Vector int1(n * n), int2(n * n), int3(n * n);
+    Vector UL(n), UR(n);
+
     Vector VL = {1.0, 0.0, 1.0};
     Vector VR = {0.125, 0.0, 0.1};
-
-    Vector UL(n, 0.0), UR(n, 0.0);
-    
     primtocons(UL.data(), VL.data());
     primtocons(UR.data(), VR.data());
 
-
+    double L = 2.0;
+    double S = L / (Nx_total - 1);
     double t = 0.0;
+    double dt = 1e-4;
 
-    for (int i = 0; i <= Nx + 1; ++i) {
+    for (int i = 0; i <= Nx_local + 1; ++i) {
         for (int k = 0; k < n; ++k) {
-            U[i * n + k] = (i <= (Nx + 2) / 2) ? UL[k] : UR[k];
+            U[i * n + k] = (start + i <= Nx_total / 2) ? UL[k] : UR[k];
         }
     }
-
-    double dt = 1e-7;
-    Vector V1(n, 0.0), V2(n, 0.0), Q(n, 0.0), W(n, 0.0);  
-    Vector int1(n * n, 0.0), int2(n * n, 0.0), int3(n * n, 0.0), int4(n * n, 0.0);   
-    double rho, u, p, a, lp, lm, l, lc, lt, e; 
-
 
     while (t <= 0.5) {
 
-        for (int k = 0; k < n; ++k) {
-            U[k] = UL[k];              
-            U[(Nx + 1) * n + k] = UR[k]; 
-        }
 
-
-        for (int i = 0; i <= Nx; ++i) {
-            int idx = i * n; 
+        for (int i = 0; i <= Nx_local; ++i) {
+            int idx = i * n;
             int iidx = (i + 1) * n;
             int aidx = i * n * n;
 
+            // Positive flux calculation
             constoprim(V.data(), &U[idx]);
+            double rho = V[0];
+            double u = V[1];
+            double p = V[2];
+            double a = sqrt(gam * p / rho);
 
-            rho = V[0];
-            u = V[1];
-            p = V[2]; 
-            a = sqrt(gam * p / rho); 
-            e = computeInternalEnergy(&U[idx]); 
-            
+            double lp = 0.5 * (u + a + fabs(u + a));
+            double lm = 0.5 * (u - a + fabs(u - a));
+            double l = 0.5 * (u + fabs(u));
+            double lt = 0.5 * (lp - lm);
+            double lc = 0.5 * (lp + lm - 2 * l);
 
-            // Compute positive flux Jacobian
-            lp = 0.5 * (u + a + fabs(u + a));
-            lm = 0.5 * (u - a + fabs(u - a));
-            l = 0.5 * (u + fabs(u)); 
-            lt = 0.5 * (lp - lm);
-            lc = 0.5 * (lp + lm - 2 * l);
+            for (int k = 0; k < n; ++k) int1[k * n + k] = l;
 
-            for (int k = 0; k < n; ++k) {
-                int1[k * n + k] = l;
-            }
-            
-            V1 = {lc / (a * a), (u * lc + a * lt)/(a * a), (U[idx + 2]/U[idx] * lc + a * u * lt)/(a * a) };
-            Q = {-0.5 * u * u * (gam - 1), -u * (gam - 1), (gam - 1)};
-
-            V2 = {lt / a, u * lt / a + lc, U[idx + 2]/U[idx] * lt / a + u * lc};
+            V1 = {lc / (a * a), (u * lc + a * lt) / (a * a), ((U[idx + 2] + computePressure(&U[idx])) / U[idx] * lc + a * u * lt) / (a * a)};
+            Q = {0.5 * u * u * (gam - 1), -u * (gam - 1), (gam - 1)};
+            V2 = {lt / a, u * lt / a + lc, (U[idx + 2] + computePressure(&U[idx])) / U[idx] * lt / a + u * lc};
             W = {-u, 1, 0};
 
-            outer_product(V1.data(), Q.data(), int2.data(), n);   
-            outer_product(V2.data(), W.data(), int3.data(), n); 
+            outer_product(V1.data(), Q.data(), int2.data(), n);
+            outer_product(V2.data(), W.data(), int3.data(), n);
 
-            for (int k = 0; k < n * n; ++k) {
-                A_plus[aidx + k] = int2[k] + int3[k] + int1[k];
-            }
-
+            for (int k = 0; k < n * n; ++k) A_plus[aidx + k] = int1[k] + int2[k] + int3[k];
             matvec_mult(&A_plus[aidx], &U[idx], &F_plus[idx], n);
 
-           
-            // Compute negative flux Jacobian
+            // Negative flux calculation
             constoprim(V.data(), &U[iidx]);
-
-            rho = V[0];
-            u = V[1];
-            p = V[2]; 
-            a = sqrt(gam * p / rho); 
-            e = computeInternalEnergy(&U[iidx]); 
-
+            rho = V[0]; u = V[1]; p = V[2];
+            a = sqrt(gam * p / rho);
             lp = 0.5 * (u + a - fabs(u + a));
             lm = 0.5 * (u - a - fabs(u - a));
-            l = 0.5 * (u - fabs(u)); 
+            l = 0.5 * (u - fabs(u));
             lt = 0.5 * (lp - lm);
             lc = 0.5 * (lp + lm - 2 * l);
 
-            for (int k = 0; k < n; ++k) {
-                int1[k * n + k] = l;
-            }
-            
-            V1 = {lc / (a * a), (u * lc + a * lt)/(a * a), (U[iidx + 2]/U[iidx] * lc + a * u * lt)/(a * a) };
-            Q = {-0.5 * u * u * (gam - 1), -u * (gam - 1), (gam - 1)};
-
-            V2 = {lt / a, u * lt / a + lc, U[iidx + 2]/U[iidx] * lt / a + u * lc};
+            for (int k = 0; k < n; ++k) int1[k * n + k] = l;
+            V1 = {lc / (a * a), (u * lc + a * lt) / (a * a), ((U[iidx + 2] + computePressure(&U[iidx])) / U[iidx] * lc + a * u * lt) / (a * a)};
+            Q = {0.5 * u * u * (gam - 1), -u * (gam - 1), (gam - 1)};
+            V2 = {lt / a, u * lt / a + lc, (U[iidx + 2] + computePressure(&U[iidx])) / U[iidx] * lt / a + u * lc};
             W = {-u, 1, 0};
 
-            outer_product(V1.data(), Q.data(), int2.data(), n);   
-            outer_product(V2.data(), W.data(), int3.data(), n); 
-
-            for (int k = 0; k < n * n; ++k) {
-                A_minus[aidx + k] = int2[k] + int3[k] + int1[k];
-            }
-
+            outer_product(V1.data(), Q.data(), int2.data(), n);
+            outer_product(V2.data(), W.data(), int3.data(), n);
+            for (int k = 0; k < n * n; ++k) A_minus[aidx + k] = int1[k] + int2[k] + int3[k];
             matvec_mult(&A_minus[aidx], &U[iidx], &F_minus[idx], n);
-            
-            for (int k = 0; k < n; ++k) {
-                Flux[idx + k] = F_plus[idx + k] + F_minus[idx + k];
-            }
+
+            // Total flux calculation
+            for (int k = 0; k < n; ++k) Flux[idx + k] = F_plus[idx + k] + F_minus[idx + k];
         }
 
-
-        for (int i = 0; i <= Nx; ++i) {
-            int fidx = i * n; 
+        // Update U
+        for (int i = 0; i <= Nx_local; ++i) {
+            int idx = (i + 1) * n;
+            int fidx = i * n;
             int fiidx = (i + 1) * n;
-            int uidx = (i + 1) * n;
-            
             for (int k = 0; k < n; ++k) {
-                U[uidx + k] += -dt / S * (-Flux[fidx + k] + Flux[fiidx + k]); 
+                U[idx + k] += -dt / S * (-Flux[fidx + k] + Flux[fiidx + k]);
             }
-
         }
-
 
         t += dt;
-        if (counter % 1000 == 0) {
-            cout << "t = " << t << "\tdt = " << dt << endl;
-        }        
+        if (counter % 100 == 0 && rank == 0) {
+            std::cout << "t = " << t << "\tdt = " << dt << std::endl;
+        }
         counter++;
-
-        dt = compute_max_dt(U, Nx, S, 1.0);
-
+        dt = compute_max_dt(U, Nx_local, S, CFL);
     }
 
-    string filename = "sod_shock.csv";   
-    write_U_to_csv(U, Nx, filename);
-    cout << "Program finished!" << endl;
+    // Gather all into U_gathered
+    vector<double> U_gathered;
+    if (rank == 0) U_gathered.resize((Nx_total + 2) * n);
 
+    MPI_Gather(U.data() + n, Nx_local * n, MPI_DOUBLE, U_gathered.data() + n, Nx_local * n, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+    if (rank == 0) {
+        write_U_to_csv(U_gathered, Nx_total, "sod_shock_mpi.csv");
+        std::cout << "Program finished!" << std::endl;
+    }
+
+    double end_time = MPI_Wtime();    // End timer
+    double elapsed = end_time - start_time;
+
+    if (rank == 0) {
+        std::cout << "Elapsed time: " << elapsed << " seconds\n";
+    }
+
+    MPI_Finalize();
     return 0;
-
 }
+
+
