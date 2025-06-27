@@ -7,10 +7,10 @@ int main(int argc, char* argv[]) {
 
     double start_time = MPI_Wtime(); 
 
-    int Nx = 50; 
+    int Nx = 10000; 
+    double CFL = 0.9; 
 
-    SodSolver1D solver(Nx);
-
+    SodSolver1D solver(Nx, CFL);
     solver.solve();  
 
     double end_time = MPI_Wtime();    // End timer

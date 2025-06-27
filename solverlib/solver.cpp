@@ -32,7 +32,7 @@ void constoprim(const double* U, double* V, const int dimensions) {
 }
 
 // SodSolver1D Constructor
-SodSolver1D::SodSolver1D(int Nx) : Nx(Nx) {
+SodSolver1D::SodSolver1D(int Nx, double CFL) : Nx(Nx), CFL(CFL) {
 
 
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -40,9 +40,6 @@ SodSolver1D::SodSolver1D(int Nx) : Nx(Nx) {
 
 
     Nx_local = Nx / size;
-    int istart = rank * Nx_local;  
-    int iend = (rank == size - 1) ? Nx : (rank + 1) * Nx_local;
-
 
     L = 2.0;
     dx = L / (Nx - 1);
@@ -50,8 +47,27 @@ SodSolver1D::SodSolver1D(int Nx) : Nx(Nx) {
     t = 0.0;
     dt = 1e-5;
 
+    U_gathered = Vector((Nx + 2) * n, 0.0);
+    UL = Vector(n, 0.0);
+    UR = Vector(n, 0.0);
+    if (rank == 0) {
+        
+        Vector VL = {1.0, 0.0, 1.0};
+        Vector VR = {0.125, 0.0, 0.1};
+        primtocons(UL.data(), VL.data(), n_vel);
+        primtocons(UR.data(), VR.data(), n_vel);
+
+        for (int i = 0; i < Nx + 2; ++i) {
+            for (int k = 0; k < n; ++k) {
+                U_gathered[i * n + k] = (i <= Nx / 2) ? UL[k] : UR[k];
+            }
+        }
+    }
+
+    MPI_Bcast(UL.data(), n, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Bcast(UR.data(), n, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+ 
     U = Vector((Nx_local + 2) * n, 0.0); 
-    U_gathered = Vector((Nx + 2) * n, 0.0); 
     Flux = Vector((Nx_local + 1) * n, 0.0);
     F_plus = Vector((Nx_local + 1) * n, 0.0);
     F_minus = Vector((Nx_local + 1) * n, 0.0);
@@ -63,42 +79,48 @@ SodSolver1D::SodSolver1D(int Nx) : Nx(Nx) {
     V2 = Vector(n, 0.0);
     Q = Vector(n, 0.0);
     W = Vector(n, 0.0);
-    UL = Vector(n, 0.0);
-    UR = Vector(n, 0.0);
     int1 = Vector(n * n, 0.0);
     int2 = Vector(n * n, 0.0);
     int3 = Vector(n * n, 0.0);
 
-    Vector VL = {1.0, 0.0, 1.0};
-    Vector VR = {0.125, 0.0, 0.1};
-    primtocons(UL.data(), VL.data(), n_vel);
-    primtocons(UR.data(), VR.data(), n_vel);
-
-    for (int i = 0; i <= Nx_local + 1; ++i) {
-        for (int k = 0; k < n; ++k) {
-            U[i * n + k] = (istart + i <= Nx / 2) ? UL[k] : UR[k];
-        }
-    }
-
+    MPI_Scatter(U_gathered.data() + n, Nx_local * n, MPI_DOUBLE,
+                U.data() + n, Nx_local * n, MPI_DOUBLE,
+                0, MPI_COMM_WORLD);
 }
 void SodSolver1D::exchange_ghost_cells() {
-    MPI_Status status;
-    // Send left, receive right
+    MPI_Status status_left, status_right;
+
+    // Exchange with left neighbor
     if (rank > 0) {
         MPI_Sendrecv(U.data() + n, n, MPI_DOUBLE, rank - 1, 0,
                      U.data(), n, MPI_DOUBLE, rank - 1, 1,
-                     MPI_COMM_WORLD, &status);
+                     MPI_COMM_WORLD, &status_left);
     }
-    // Send right, receive left
+
+    // Exchange with right neighbor
     if (rank < size - 1) {
         MPI_Sendrecv(U.data() + Nx_local * n, n, MPI_DOUBLE, rank + 1, 1,
                      U.data() + (Nx_local + 1) * n, n, MPI_DOUBLE, rank + 1, 0,
-                     MPI_COMM_WORLD, &status);
+                     MPI_COMM_WORLD, &status_right);
+    }
+
+    if (rank == 0) {
+        for (int k = 0; k < n; ++k) {
+            U[k] = UL[k];  // ghost cell at index 0 * n + k
+        }
+    }
+
+    // Set right ghost cell (index Nx_local+1) on last rank to UR (boundary right state)
+    if (rank == size - 1) {
+        int ghost_idx = (Nx_local + 1) * n;
+        for (int k = 0; k < n; ++k) {
+            U[ghost_idx + k] = UR[k];
+        }
     }
 }
 void SodSolver1D::compute_dt() { 
 
-    double min_dt = numeric_limits<double>::max();
+    double local_min_dt = std::numeric_limits<double>::max();
 
     for (int i = 0; i < Nx_local; ++i) { // skip ghost cells
         int idx = i * 3;
@@ -109,17 +131,20 @@ void SodSolver1D::compute_dt() {
         double u = mom / rho;
         double e = E / rho - 0.5 * u * u;
         double p = (perfgam - 1) * rho * e;
-        double a = sqrt(perfgam * p / rho);
+        double a = std::sqrt(perfgam * p / rho);
 
-        double local_speed = abs(u) + a;
+        double local_speed = std::abs(u) + a;
 
-        if (local_speed > 1e-8) { // avoid division by zero
-            double dt = dx / local_speed;
-            min_dt = min(min_dt, dt);
+        if (local_speed > 1e-8) {
+            double local_dt = CFL * dx / local_speed;
+            local_min_dt = std::min(local_min_dt, local_dt);
         }
     }
 
-    dt = min_dt;
+    // Get global minimum dt across all ranks
+    MPI_Allreduce(&local_min_dt, &dt, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
+
+
 }
 void SodSolver1D::write_U_to_csv(string filename) { 
 
@@ -132,9 +157,9 @@ void SodSolver1D::write_U_to_csv(string filename) {
     file << "rho,u,p\n";
     Vector V(3, 0.0); 
 
-    for (int i = 0; i < Nx; ++i) {
+    for (int i = 0; i < Nx + 2; ++i) {
         int idx = i * 3;
-        constoprim(V.data(), &U_gathered[idx], n_vel);
+        constoprim(&U_gathered[idx], V.data(), n_vel);
         file << V[0] << ',' << V[1] << ',' << V[2] << '\n';
     }
 
@@ -148,7 +173,7 @@ void SodSolver1D::compute_fluxes() {
             int aidx = i * n * n;
 
             // Positive flux calculation
-            constoprim(V.data(), &U[idx], n_vel);
+            constoprim(&U[idx], V.data(), n_vel);
             double rho = V[0];
             double u = V[1];
             double p = V[2];
@@ -159,7 +184,7 @@ void SodSolver1D::compute_fluxes() {
             double l = 0.5 * (u + fabs(u));
             double lt = 0.5 * (lp - lm);
             double lc = 0.5 * (lp + lm - 2 * l);
-
+   
             fill(int1.begin(), int1.end(), 0.0);
             for (int k = 0; k < n; ++k) int1[k * n + k] = l;
 
@@ -175,18 +200,21 @@ void SodSolver1D::compute_fluxes() {
             matvec_mult(&A_plus[aidx], &U[idx], &F_plus[idx], n);
 
             // Negative flux calculation
-            constoprim(V.data(), &U[iidx], n_vel);
-            rho = V[0]; u = V[1]; p = V[2];
+            constoprim(&U[iidx], V.data(), n_vel);
+            rho = V[0]; 
+            u = V[1]; 
+            p = V[2];
             a = sqrt(perfgam * p / rho);
+
             lp = 0.5 * (u + a - fabs(u + a));
             lm = 0.5 * (u - a - fabs(u - a));
             l = 0.5 * (u - fabs(u));
             lt = 0.5 * (lp - lm);
             lc = 0.5 * (lp + lm - 2 * l);
 
-
             fill(int1.begin(), int1.end(), 0.0);
             for (int k = 0; k < n; ++k) int1[k * n + k] = l;
+
             V1 = {lc / (a * a), (u * lc + a * lt) / (a * a), ((U[iidx + 2] + computePressure(&U[iidx], n_vel)) / U[iidx] * lc + a * u * lt) / (a * a)};
             Q = {0.5 * u * u * (perfgam - 1), -u * (perfgam - 1), (perfgam - 1)};
             V2 = {lt / a, u * lt / a + lc, (U[iidx + 2] + computePressure(&U[iidx], n_vel)) / U[iidx] * lt / a + u * lc};
@@ -194,7 +222,9 @@ void SodSolver1D::compute_fluxes() {
 
             outer_product(V1.data(), Q.data(), int2.data(), n);
             outer_product(V2.data(), W.data(), int3.data(), n);
+
             for (int k = 0; k < n * n; ++k) A_minus[aidx + k] = int1[k] + int2[k] + int3[k];
+
             matvec_mult(&A_minus[aidx], &U[iidx], &F_minus[idx], n);
 
             // Total flux calculation
@@ -214,12 +244,22 @@ void SodSolver1D::update_U() {
 void SodSolver1D::solve() {
     
     int counter = 0;
-  
+
+    exchange_ghost_cells();      
+   
     while (t <= 0.5) {
-        compute_dt();
-        exchange_ghost_cells(); 
-        compute_fluxes();
+        compute_dt();    
+        exchange_ghost_cells();      
+        compute_fluxes();      
         update_U();
+
+        // std::cout << "Rank " << rank << " U = [";
+        // for (int i = 0; i < (Nx_local + 2) * n; ++i) {
+        //     std::cout << U[i];
+        //     if (i != (Nx_local + 2) * n - 1) std::cout << ", ";
+        // }
+        // std::cout << "]\n";
+        // std::cout.flush();
 
         t += dt; 
 
@@ -229,9 +269,6 @@ void SodSolver1D::solve() {
         counter++;
 
     }
-
-
-    if (rank ==0) U_gathered.resize((Nx + 2) * n);
 
     MPI_Gather(U.data() + n, Nx_local * n, MPI_DOUBLE,
            U_gathered.data(), Nx_local * n, MPI_DOUBLE,

@@ -6,7 +6,6 @@
 constexpr double perfgam = 1.4;
 constexpr double perfR = 287.0;
 
-
 void primtocons(double* U, const double* V, const int dimensions);
 void constoprim(const double* U, double* V, const int dimensions);
 
@@ -35,7 +34,8 @@ private:
     int n = 3;
 
     int Nx, Nx_local;
-    double dt, CFL, dx, L, t;   
+    double CFL; 
+    double dt, dx, L, t;   
     string save_filename; 
 
     Vector U, U_gathered, Flux, F_plus, F_minus, A_plus, A_minus, A_rho, V, V1, V2, Q, W, int1, int2, int3, UL, UR;   
@@ -45,7 +45,7 @@ public:
 
     int rank, size;
     
-    SodSolver1D(int Nx);  
+    SodSolver1D(int Nx, double CFL);   
 
     void solve();
     void exchange_ghost_cells(); 
