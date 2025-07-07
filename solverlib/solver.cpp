@@ -31,7 +31,10 @@ void constoprim(const double* U, double* V, const int dimensions) {
     V[dimensions + 1] = (U[dimensions + 1] - 0.5 / U[0] * udotu) * (perfgam - 1); // Set pressure
 }
 
-// SodSolver1D Constructor
+
+/////////////////////////////////////////////////
+//////// Sod Shock Tube Solver Functions ////////
+/////////////////////////////////////////////////
 SodSolver1D::SodSolver1D(int Nx, double CFL) : Nx(Nx), CFL(CFL) {
 
 
@@ -50,6 +53,7 @@ SodSolver1D::SodSolver1D(int Nx, double CFL) : Nx(Nx), CFL(CFL) {
     U_gathered = Vector((Nx + 2) * n, 0.0);
     UL = Vector(n, 0.0);
     UR = Vector(n, 0.0);
+
     if (rank == 0) {
         
         Vector VL = {1.0, 0.0, 1.0};
@@ -280,3 +284,126 @@ void SodSolver1D::solve() {
         cout << "Program finished!" << endl;
     }
 }
+
+
+////////////////////////////////////
+//////// Solver2D Functions ////////
+////////////////////////////////////
+
+Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, Grid& grid, BCMap BCs) : Nx(Nx), Ny(Ny), CFL(CFL) {
+    
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    Nx_local = Nx / size;
+
+    t = 0.0; 
+
+    U_gathered = Vector( Nx * Ny * n, 0.0); 
+    U = Vector(n * (Nx_local + 2) * (Ny + 2), 0.0); 
+
+    // Important Flux Vectors
+    iFlux = Vector( ((Nx_local + 1) * Ny) * n, 0.0);
+    jFlux = Vector( ((Ny + 1) * Nx_local) * n, 0.0); 
+
+    // Important Jacobians
+    iPlus_A = Vector( (Nx_local + 1) * Ny * n * n, 0.0);
+    iMinus_A = Vector( (Nx_local + 1) * Ny * n * n, 0.0);
+    jPlus_A = Vector( Nx_local * (Ny + 1) * n * n, 0.0);
+    jMinus_A = Vector( Nx_local * (Ny + 1) * n * n, 0.0);
+    irho_A = Vector( (Nx_local + 1) * Ny * n * n, 0.0);
+    jrho_A = Vector( Nx_local * (Ny + 1) * n * n, 0.0); 
+
+    // Intermediate matrices for calculations
+    V = Vector(n, 0.0);
+    V1 = Vector(n, 0.0);
+    V2 = Vector(n, 0.0);
+    Q = Vector(n, 0.0);
+    W = Vector(n, 0.0);
+    int1 = Vector(n * n, 0.0);
+    int2 = Vector(n * n, 0.0);
+    int3 = Vector(n * n, 0.0);
+
+    if (rank == 0) {
+        for (int i = 0; i < Nx * Ny; ++i) {
+            for (int k = 0; k < n; ++k) {
+                U_gathered[i * n + k] = U_inlet[k]; 
+            }
+        }
+    }
+
+    Vector recv_buf(Nx_local * Ny * n); 
+
+    MPI_Scatter(U_gathered.data(), Nx_local * Ny * n, MPI_DOUBLE,
+                recv_buf.data(), Nx_local * Ny * n, MPI_DOUBLE,
+                0, MPI_COMM_WORLD);
+
+    for (int j = 0; j < Ny; ++j) {
+        for (int i = 0; i < Nx_local; ++i) {
+            for (int k = 0; k < n; ++k) {
+                int idx_recv = k * Nx_local * Ny + j * Nx_local + i;
+                int idx_local = k * (Nx_local + 2) * (Ny + 2) + (j + 1) * (Nx_local + 2) + (i + 1);
+                U[idx_local] = recv_buf[idx_recv];
+            }
+        }
+    }    
+}
+
+void Solver2D::exchange_ghost_cells() {
+    MPI_Status status_left, status_right;
+
+    int col_size = Ny * n;
+
+    Vector send_left(col_size), recv_left(col_size);
+    Vector send_right(col_size), recv_right(col_size);
+
+    for (int j = 0; j < Ny; ++j) {
+        for (int k = 0; k < n; ++k) {
+
+            int local_left = k * (Nx_local + 2) * (Ny + 2) + (j + 1) * (Nx_local + 2) + 1;
+            int local_right = k * (Nx_local + 2) * (Ny + 2) + (j + 1) * (Nx_local + 2) + Nx_local;
+
+            send_left[j * n + k] = U[local_left];
+            send_right[j * n + k] = U[local_right];
+        }
+    }
+
+    if (rank > 0) {
+        MPI_Sendrecv(send_left.data(), col_size, MPI_DOUBLE, rank - 1, 0,
+                     recv_left.data(), col_size, MPI_DOUBLE, rank - 1, 1,
+                     MPI_COMM_WORLD, &status_left);
+    }
+
+    if (rank < size - 1) {
+        MPI_Sendrecv(send_right.data(), col_size, MPI_DOUBLE, rank + 1, 1,
+                     recv_right.data(), col_size, MPI_DOUBLE, rank + 1, 0,
+                     MPI_COMM_WORLD, &status_right);
+    }
+
+
+    for (int j = 0; j < Ny; ++j) {
+        for (int k = 0; k < n; ++k) {
+            if (rank > 0) {
+                int ghost_left = k * (Nx_local + 2) * (Ny + 2) + (j + 1) * (Nx_local + 2);
+                U[ghost_left] = recv_left[j * n + k];
+            }
+
+            if (rank < size - 1) {
+                int ghost_right = k * (Nx_local + 2) * (Ny + 2) + (j + 1) * (Nx_local + 2) + (Nx_local + 1);
+                U[ghost_right] = recv_right[j * n + k];
+            }
+        }
+    }
+
+
+}
+
+
+
+
+
+
+
+
+
+

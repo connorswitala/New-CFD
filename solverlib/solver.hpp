@@ -1,4 +1,4 @@
-#include "../linalglib/linalg.hpp"
+#include "../writefilelib/writefile.hpp" 
 #include <mpi.h>
 #include <fstream>
 
@@ -53,5 +53,36 @@ public:
     void compute_fluxes(); 
     void update_U();
     void write_U_to_csv(string filename);
+
+};
+
+class Solver2D {
+private: 
+
+int n_vel = 2;
+int n = 4;
+
+int Nx, Ny, Nx_local, Ny_local, N_cells, N_local;
+double CFL, dt, t;
+string save_filename;
+
+Vector U, U_inlet, U_gathered, iFlux, jFlux, iPlus_A, iMinus_A, jPlus_A, jMinus_A, irho_A, jrho_A, V, V1, V2, Q, W, int1, int2, int3, UL, UR;
+Grid& grid;
+BCMap BCs; 
+
+public:
+
+int rank, size;
+
+Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, Grid& grid, BCMap BCs); 
+
+void solve();
+void exchange_ghost_cells();
+void compute_dt();
+void compute_fluxes();
+void line_relaxation();
+void update_U();
+void compute_inner_res();
+void compute_outer_res();
 
 };
