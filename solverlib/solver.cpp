@@ -348,7 +348,6 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, Grid& grid, BCMap
         }
     }    
 }
-
 void Solver2D::exchange_ghost_cells() {
     MPI_Status status_left, status_right;
 
@@ -398,6 +397,26 @@ void Solver2D::exchange_ghost_cells() {
 
 }
 
+
+
+
+int Solver2D::cell_index(int i, int j, int k) {
+    return k * (Nx_local + 2) * (Ny + 2)
+         + j * (Nx_local + 2)
+         + i;
+}
+int Solver2D::x_index(int i, int j, int k) {
+    return k * (Nx_local + 1) * Ny + j * (Nx_local + 1) + i;
+}
+int Solver2D::y_index(int i, int j, int k) {
+    return k * Nx_local * (Ny + 1) + j * Nx_local + i;
+}
+void Solver2D::compute_fluxes() {
+
+
+
+
+}
 
 
 

@@ -1,15 +1,18 @@
 #include <fstream>
 #include <iostream>
+#include "../writefilelib/writefile.hpp"
 using namespace std;
 
 int main() {
-    ofstream file("C:/Users/frodo/Desktop/test_output.csv");
-    if (!file.is_open()) {
-        cerr << "Failed to open file.\n";
-        return 1;
-    }
-    file << "hello,world\n";
-    file.close();
-    cout << "Wrote file.\n";
+    
+    string filename = "newgridtesting.dat";
+
+    int Nx = 100, Ny = 100;
+
+    RampGrid grid(Nx, Ny, 3, 0.75, 15); 
+    cout << 1 << endl;
+    cout << grid.iArea(0,0) << endl;
+    output_grid(grid, Nx, Ny, filename); 
+    cout << 2 << endl;
     return 0;
 }

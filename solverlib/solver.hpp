@@ -76,6 +76,10 @@ int rank, size;
 
 Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, Grid& grid, BCMap BCs); 
 
+int cell_index(int i, int j, int k);
+int x_index(int i, int j, int k);
+int y_index(int i, int j, int k);
+
 void solve();
 void exchange_ghost_cells();
 void compute_dt();
