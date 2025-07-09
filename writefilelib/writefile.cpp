@@ -36,15 +36,13 @@
 
 void output_grid(Grid& grid, const int& Nx, const int& Ny, string& filename) {
     
-
     ofstream file(filename);
     file << "Variables = \" x points\", \"y points\" \n";    
     file << "ZONE T=\"Grid\", I=" << Nx << ", J=" << Ny << ", F=POINT\n";
 
     for (int i = 0; i <= Nx; ++i) {
-        for (int j = 0; j <= Ny; ++j) {
-            file << grid.xVertex(i, j) << " " << grid.yVertex(i, j) << endl;       
-            cout << j * Nx + i << endl;       
+        for (int j = 0; j <= Ny; ++j) {  
+            file << grid.xVertex(i, j) << " " << grid.yVertex(i, j) << endl;          
         }
     }
 

@@ -22,17 +22,18 @@ double NewtonMethod(double max_dist, int n_points, double d_min) {
 /////////////////////////////////////////////////
 
 RampGrid::RampGrid(int Nx, int Ny, double L, double inlet_height, double ramp_angle)
-	: Nx(Nx), Ny(Ny), L(L), inlet_height(inlet_height), ramp_angle(ramp_angle) {
-
-		Vector x_vertices( (Nx + 1) * (Ny + 1), 0.0);
-		Vector y_vertices( (Nx + 1) * (Ny + 1), 0.0);
-		Vector x_cellCenters(Nx * Ny, 0.0);
-		Vector y_cellCenters(Nx * Ny, 0.0);
-		Vector iface_xNormals((Nx + 1) * Ny, 0.0);
-		Vector iface_yNormals((Nx + 1) * Ny, 0.0);
-		Vector jface_xNormals(Nx * (Ny + 1), 0.0);
-		Vector jface_yNormals(Nx * (Ny + 1), 0.0);
-		Vector iAreas((Nx + 1) * Ny, 0.0), jAreas(Nx * (Ny + 1), 0.0), cellVolumes(Nx * Ny, 0.0);
+	: Nx(Nx), Ny(Ny), L(L), inlet_height(inlet_height), ramp_angle(ramp_angle), 
+		x_vertices( (Nx + 1) * (Ny + 1), 0.0),
+		y_vertices( (Nx + 1) * (Ny + 1), 0.0),
+		x_cellCenters(Nx * Ny, 0.0),
+		y_cellCenters(Nx * Ny, 0.0),
+		iface_xNormals((Nx + 1) * Ny, 0.0),
+		iface_yNormals((Nx + 1) * Ny, 0.0),
+		jface_xNormals(Nx * (Ny + 1), 0.0),
+		jface_yNormals(Nx * (Ny + 1), 0.0),
+		iAreas((Nx + 1) * Ny, 0.0),
+		jAreas(Nx * (Ny + 1), 0.0),
+		cellVolumes(Nx * Ny, 0.0)  {
 
 		int i,j;
 		double dx = L / Nx;
@@ -85,8 +86,6 @@ RampGrid::RampGrid(int Nx, int Ny, double L, double inlet_height, double ramp_an
 				
 			}
 		}
-
-
 	
 
 	// Edge vectors
@@ -96,36 +95,49 @@ RampGrid::RampGrid(int Nx, int Ny, double L, double inlet_height, double ramp_an
 	for (i = 0; i < Nx; ++i) {
 		for (j = 0; j < Ny; ++j) {
 
-			int ij = j * Nx + i;
-			int iij = j * Nx + i + 1;  
-			int ijj = (j + 1) * Nx + i;
-			int iijj = (j + 1) * Nx + i + 1; 
+			int ij = j * (Nx + 1) + i;
+			int iij = j * (Nx + 1) + i + 1;  
+			int ijj = (j + 1) * (Nx + 1) + i;
+			int iijj = (j + 1) * (Nx + 1) + i + 1;  
 
 			DA = { x_vertices[ij] - x_vertices[ijj], y_vertices[ij] - y_vertices[ijj] }; 
 			AB = { x_vertices[iij] - x_vertices[ij], y_vertices[iij] - y_vertices[ij] };
 			BC = { x_vertices[iijj] - x_vertices[iij], y_vertices[iijj] - y_vertices[iij] };
 			CD = { x_vertices[ijj] - x_vertices[iijj], y_vertices[ijj] - y_vertices[iijj] }; 
 
-			x_cellCenters[ij] = (x_vertices[ij] + x_vertices[iij] + x_vertices[iijj] + x_vertices[ijj]) / 4;
-			y_cellCenters[ij] =	(y_vertices[ij] + y_vertices[iij] + y_vertices[iijj] + y_vertices[ijj]) / 4;
+			int cell_ij = j * Nx + i; 
 
-			cellVolumes[ij] = 0.5 * fabs(DA.x * AB.y - DA.y * AB.x) + 0.5 * fabs(BC.x * CD.y - BC.y * CD.x);
+			x_cellCenters[cell_ij] = (x_vertices[ij] + x_vertices[iij] + x_vertices[iijj] + x_vertices[ijj]) / 4;
+			y_cellCenters[cell_ij] =	(y_vertices[ij] + y_vertices[iij] + y_vertices[iijj] + y_vertices[ijj]) / 4;
+
+			cellVolumes[cell_ij] = 0.5 * fabs(DA.x * AB.y - DA.y * AB.x) + 0.5 * fabs(BC.x * CD.y - BC.y * CD.x);
+
+			// cout << "xcenter: " << fixed << setprecision(3) << x_cellCenters[cell_ij] 
+			// << "\tycenter: " << fixed << setprecision(3) << y_cellCenters[cell_ij] 
+			// << "\tcell volume: " << fixed << setprecision(3) << cellVolumes[cell_ij] << endl; 
 		}
 	}
+
 
 	// Calculates geometries for i-faces
 	for (i = 0; i <= Nx; ++i) {
 		for (j = 0; j < Ny; ++j) {
 
 			int ij = j * (Nx + 1) + i;
-			int ijj = (j + 1) * (Nx + 1) + i;
+			int ijj = (j + 1) * (Nx + 1) + i; 
+
+			int face_ij = j * (Nx + 1) + i;
 
 			AB = { x_vertices[ijj] - x_vertices[ij], y_vertices[ijj] - y_vertices[ij] };
 
-			iAreas[ij] = sqrt(AB.x * AB.x + AB.y * AB.y); 
+			iAreas[face_ij] = sqrt(AB.x * AB.x + AB.y * AB.y); 
 
-			iface_xNormals[ij] = AB.y / fabs(iAreas[ij]);
-			iface_yNormals[ij] = AB.x / fabs(iAreas[ij]);
+			iface_xNormals[face_ij] = AB.y / fabs(iAreas[face_ij]);
+			iface_yNormals[face_ij] = AB.x / fabs(iAreas[face_ij]);
+
+			// cout << "i area: " << fixed << setprecision(3) << iAreas[face_ij] 
+			// << "\ti-x norm: " << fixed << setprecision(3) << iface_xNormals[face_ij] 
+			// << "\ti-y norm: " << fixed << setprecision(3) << iface_yNormals[face_ij] << endl;
 		}
 	}
 
@@ -133,54 +145,67 @@ RampGrid::RampGrid(int Nx, int Ny, double L, double inlet_height, double ramp_an
 	for (i = 0; i < Nx; ++i) {
 		for (j = 0; j <= Ny; ++j) {
 
-			int ij = j * Nx + i;
-			int iij = j * Nx + i + 1;
+			int ij = j * (Nx + 1) + i;
+			int iij = j * (Nx + 1) + i + 1;
 
 			CD = { x_vertices[iij] - x_vertices[ij], y_vertices[iij] - y_vertices[ij] };
 
-			jAreas[ij] = sqrt(CD.x * CD.x + CD.y * CD.y);
+			int face_ij = j * Nx + i;
 
-			jface_xNormals[ij] = -CD.y / fabs(jAreas[ij]);
-			jface_yNormals[ij] = CD.x / fabs(jAreas[ij]);
+			jAreas[face_ij] = sqrt(CD.x * CD.x + CD.y * CD.y);
+
+			jface_xNormals[face_ij] = -CD.y / fabs(jAreas[face_ij]);
+			jface_yNormals[face_ij] = CD.x / fabs(jAreas[face_ij]);
+
+			// cout << "j area: " << fixed << setprecision(3) <<  jAreas[face_ij] 
+			// << "\tj-x norm: " << fixed << setprecision(3) << jface_xNormals[face_ij] 
+			// << "\tj-y norm: " << fixed << setprecision(3) << jface_yNormals[face_ij] << endl;
 		}
 	}
+
+	cout << "Grid generation complete!" << endl;
 }
 
 
+// Cell centers
 inline double RampGrid::xCenter(int i, int j) const {
 	return x_cellCenters[j * Nx + i];
-}
-
-inline double RampGrid::xVertex(int i, int j) const {
-	return x_vertices[j * Nx + i];
 }
 
 inline double RampGrid::yCenter(int i, int j) const {
 	return y_cellCenters[j * Nx + i];
 }
 
+// Vertices
+inline double RampGrid::xVertex(int i, int j) const {
+	return x_vertices[j * (Nx + 1) + i];
+}
+
 inline double RampGrid::yVertex(int i, int j) const {
-	return y_vertices[j * Nx + i];
+	return y_vertices[j * (Nx + 1) + i];
 }
 
+// Cell volumes
 inline double RampGrid::Volume(int i, int j) const {
-	return cellVolumes[j * Nx + i]; 
+	return cellVolumes[j * Nx + i];
 }
 
+// i-face areas and normals
 inline double RampGrid::iArea(int i, int j) const {
-	return iAreas[j * Nx + i];
-}
-
-inline double RampGrid::jArea(int i, int j) const {
-	return jAreas[j * Nx + i];
+	return iAreas[j * (Nx + 1) + i];
 }
 
 inline double RampGrid::iface_xNorm(int i, int j) const {
-	return iface_xNormals[j * Nx + i];
+	return iface_xNormals[j * (Nx + 1) + i];
 }
 
 inline double RampGrid::iface_yNorm(int i, int j) const {
-	return iface_yNormals[j * Nx + i];
+	return iface_yNormals[j * (Nx + 1) + i];
+}
+
+// j-face areas and normals
+inline double RampGrid::jArea(int i, int j) const {
+	return jAreas[j * Nx + i];
 }
 
 inline double RampGrid::jface_xNorm(int i, int j) const {
@@ -190,6 +215,7 @@ inline double RampGrid::jface_xNorm(int i, int j) const {
 inline double RampGrid::jface_yNorm(int i, int j) const {
 	return jface_yNormals[j * Nx + i];
 }
+
 
 /////////////////////////////////////////////////
 /////////// Cylinder Grid functions /////////////

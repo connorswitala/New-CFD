@@ -5,14 +5,14 @@ using namespace std;
 
 int main() {
     
-    string filename = "newgridtesting.dat";
+    string filename = "../plotfiles/newgridtesting.dat";
 
-    int Nx = 100, Ny = 100;
+    int Nx = 200, Ny = 100;
 
     RampGrid grid(Nx, Ny, 3, 0.75, 15); 
-    cout << 1 << endl;
-    cout << grid.iArea(0,0) << endl;
-    output_grid(grid, Nx, Ny, filename); 
-    cout << 2 << endl;
+
+    // cout << "i-face x normal: " << grid.iface_xNorm(Nx / 2, Ny / 2) << "\t i-face y normal: " << grid.iface_yNorm(Nx / 2, Ny / 2);
+    // cout << "j-face x normal: " << grid.jface_xNorm(Nx / 2, Ny / 2) << "\t j-face y normal: " << grid.jface_yNorm(Nx / 2, Ny / 2);
+    // output_grid(grid, Nx, Ny, filename); 
     return 0;
 }

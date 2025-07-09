@@ -3,36 +3,37 @@
 #include "../linalglib/linalg.hpp" 
 #include <fstream> 
 #include <cmath> 
- #include <memory>
+#include <memory>
+#include <iomanip> 
  
 using namespace std;
 
-// // This enum class is for setting boundary conditions types
-// enum class BCType {
-// 	IsothermalWall,
-// 	AdiabaticWall,
-// 	Inlet,
-// 	Outlet,
-// 	Symmetry,
-// 	Undefined
-// };
+// This enum class is for setting boundary conditions types
+enum class BCType {
+	IsothermalWall,
+	AdiabaticWall,
+	Inlet,
+	Outlet,
+	Symmetry,
+	Undefined
+};
 
-// // This struct contains the boundary conditions types for each side of the grid (left, right, bottom, top) 
-// struct BCMap {
+// This struct contains the boundary conditions types for each side of the grid (left, right, bottom, top) 
+struct BCMap {
 
-// 	BCType left;
-// 	BCType right;
-// 	BCType bottom;
-// 	BCType top;
+	BCType left;
+	BCType right;
+	BCType bottom;
+	BCType top;
 
-// 	BCMap(BCType left, BCType right, BCType bottom, BCType top) : left(left), right(right), bottom(bottom), top(top) {}
+	BCMap(BCType left, BCType right, BCType bottom, BCType top) : left(left), right(right), bottom(bottom), top(top) {}
 
-// };
+};
 
-// // This sets the inlet flow conditions from inputs in the UI
-// struct inlet_conditions {
-// 	double rho, u, v, p, T, M, a;
-// };
+// This sets the inlet flow conditions from inputs in the UI
+struct inlet_conditions {
+	double rho, u, v, p, T, M, a;
+};
 
 
 struct Point {
@@ -69,6 +70,11 @@ private:
     int Nx, Ny;
     double L, inlet_height, ramp_angle;
 
+
+public:
+    RampGrid(int Nx, int Ny, double L, double inlet_height, double ramp_angle);
+
+
     Vector x_vertices;
     Vector y_vertices;
     Vector x_cellCenters;
@@ -78,9 +84,6 @@ private:
     Vector jface_xNormals;
     Vector jface_yNormals;
     Vector iAreas, jAreas, cellVolumes;  
-
-public:
-    RampGrid(int Nx, int Ny, double L, double inlet_height, double ramp_angle);
 
 
     double Volume(int i, int j) const override;

@@ -290,29 +290,129 @@ void SodSolver1D::solve() {
 //////// Solver2D Functions ////////
 ////////////////////////////////////
 
-Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, Grid& grid, BCMap BCs) : Nx(Nx), Ny(Ny), CFL(CFL) {
+Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, BCMap BCs) : Nx(Nx), Ny(Ny), CFL(CFL) {
     
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    RampGrid grid(Nx, Ny, 3, 1, 15);  // This initializes the grid on rank 0 to later be scattered using MPI.
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank); 
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-
-    Nx_local = Nx / size;
 
     t = 0.0; 
 
-    U_gathered = Vector( Nx * Ny * n, 0.0); 
-    U = Vector(n * (Nx_local + 2) * (Ny + 2), 0.0); 
+    /** 
+     *
+     *      local_Nx(size) creates a vector that holds how many columns each rank gets. This is important 
+     * since we want to use any number of processes for any number of cells in the x-direction. It will have size
+     * Nx / size (+1 if r < remainder of Nx_global / size).
+     * 
+     *      disp(size) creates a vector that holds the starting column number for each rank. This is the running sum
+     * of local_Nx.
+     * 
+     *      sendcounts(size) creates a vector that holds how many elements to send to each rank. Since it is the total 
+     * number of cells being sent for a block, it will have size local_Nx[r] * Ny.
+     * 
+     *      displacements(size) is the starting index in the sendbuf for rank r.
+     */
+    vector<int> local_Nx(size), sendcounts(size), displacements(size);
+    int base = Nx / size;
+    int rem = Nx % size; 
+
+    int offset = 0;
+    for (int r = 0; r < size; ++r) {
+        local_Nx[r]       = base + (r < rem ? 1 : 0);
+        displacements[r]  = offset;
+        sendcounts[r]     = local_Nx[r] * Ny;
+        offset           += local_Nx[r] * Ny;
+    }
+
+    int Nx_local = local_Nx[rank]; 
+    int num_ifaces = (Nx_local + 1) * Ny; 
+    int num_jfaces = (Ny + 1) * Nx_local; 
+    int num_loc_cells = Nx_local * Ny; 
+    int num_gathered_cells = Nx * Ny;
+
+    U_gathered = Vector( num_gathered_cells * n, 0.0); 
+    U = Vector(((Nx_local + 2) * (Ny + 2)) * n, 0.0);  
 
     // Important Flux Vectors
-    iFlux = Vector( ((Nx_local + 1) * Ny) * n, 0.0);
-    jFlux = Vector( ((Ny + 1) * Nx_local) * n, 0.0); 
+    iFlux = Vector( num_ifaces * n, 0.0);
+    jFlux = Vector( num_jfaces * n, 0.0); 
 
     // Important Jacobians
-    iPlus_A = Vector( (Nx_local + 1) * Ny * n * n, 0.0);
-    iMinus_A = Vector( (Nx_local + 1) * Ny * n * n, 0.0);
-    jPlus_A = Vector( Nx_local * (Ny + 1) * n * n, 0.0);
-    jMinus_A = Vector( Nx_local * (Ny + 1) * n * n, 0.0);
-    irho_A = Vector( (Nx_local + 1) * Ny * n * n, 0.0);
-    jrho_A = Vector( Nx_local * (Ny + 1) * n * n, 0.0); 
+    iPlus_A = Vector( num_ifaces * n * n, 0.0);
+    iMinus_A = Vector( num_ifaces * n * n, 0.0);
+    jPlus_A = Vector( num_jfaces * n * n, 0.0);
+    jMinus_A = Vector( num_jfaces * n * n, 0.0);
+    irho_A = Vector( num_ifaces * n * n, 0.0);
+    jrho_A = Vector( num_jfaces * n * n, 0.0); 
+
+    // Local geometry data structures for each rank and scattering. 
+
+    // Scatter xCenters from grid into new vectors
+    Vector xCenter(Nx_local * Ny, 0.0);  
+    MPI_Scatterv(grid.x_cellCenters.data(), sendcounts.data(), displacements.data(), MPI_DOUBLE,
+                 xCenter.data(), num_loc_cells, MPI_DOUBLE,
+                 0, MPI_COMM_WORLD); 
+
+    // Scatter yCenters from grid into new vectors
+    Vector yCenter(Nx_local * Ny, 0.0); 
+    MPI_Scatterv(grid.y_cellCenters.data(), sendcounts.data(), displacements.data(), MPI_DOUBLE,
+                 yCenter.data(), num_loc_cells, MPI_DOUBLE,
+                 0, MPI_COMM_WORLD); 
+
+    // Scatter volumes form grid into new vectors
+    Vector Volume(Nx_local * Ny, 0.0); 
+    MPI_Scatterv(grid.cellVolumes.data(), sendcounts.data(), displacements.data(), MPI_DOUBLE,
+                 Volume.data(), num_loc_cells, MPI_DOUBLE,
+                 0, MPI_COMM_WORLD); 
+
+    // For i-faces now
+    int face_offset = 0;
+    for (int r = 0; r < size; ++r) {
+        sendcounts[r]    = (local_Nx[r] + 1) * Ny; // includes overlap
+        displacements[r] = face_offset;
+        face_offset     += (local_Nx[r] + 1) * Ny;
+    }
+
+    // Scatter i-face normals and areas
+    Vector iFxNorm(num_ifaces, 0.0);
+    MPI_Scatterv(grid.iface_xNormals.data(), sendcounts.data(), displacements.data(), MPI_DOUBLE,
+                 iFxNorm.data(), num_ifaces, MPI_DOUBLE,
+                 0, MPI_COMM_WORLD); 
+
+    Vector iFyNorm(num_ifaces, 0.0);
+    MPI_Scatterv(grid.iface_yNormals.data(), sendcounts.data(), displacements.data(), MPI_DOUBLE,
+                 iFyNorm.data(), num_ifaces, MPI_DOUBLE,
+                 0, MPI_COMM_WORLD); 
+
+    Vector iArea(num_ifaces, 0.0);
+    MPI_Scatterv(grid.iAreas.data(), sendcounts.data(), displacements.data(), MPI_DOUBLE,
+                 iArea.data(), num_ifaces, MPI_DOUBLE,
+                 0, MPI_COMM_WORLD);              
+
+    // For j-faces now
+    face_offset = 0;
+    for (int r = 0; r < size; ++r) {
+        sendcounts[r]    = local_Nx[r] * (Ny + 1); // includes overlap
+        displacements[r] = face_offset;
+        face_offset     += local_Nx[r] * (Ny + 1);
+    }
+
+    // Scatter j-face normals and areas
+    Vector jFxNorm(num_jfaces, 0.0);
+    MPI_Scatterv(grid.jface_xNormals.data(), sendcounts.data(), displacements.data(), MPI_DOUBLE,
+                 jFxNorm.data(), num_jfaces, MPI_DOUBLE,
+                 0, MPI_COMM_WORLD); 
+
+    Vector jFyNorm(num_jfaces, 0.0);
+    MPI_Scatterv(grid.jface_yNormals.data(), sendcounts.data(), displacements.data(), MPI_DOUBLE,
+                 jFyNorm.data(), num_jfaces, MPI_DOUBLE,
+                 0, MPI_COMM_WORLD); 
+
+    Vector jArea(num_jfaces, 0.0);
+    MPI_Scatterv(grid.jAreas.data(), sendcounts.data(), displacements.data(), MPI_DOUBLE,
+                 jArea.data(), num_jfaces, MPI_DOUBLE,
+                 0, MPI_COMM_WORLD); 
+
 
     // Intermediate matrices for calculations
     V = Vector(n, 0.0);
@@ -324,29 +424,46 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, Grid& grid, BCMap
     int2 = Vector(n * n, 0.0);
     int3 = Vector(n * n, 0.0);
 
+    // Only rank 0 initializes the full domain with U_inlet initial conditions
     if (rank == 0) {
-        for (int i = 0; i < Nx * Ny; ++i) {
-            for (int k = 0; k < n; ++k) {
-                U_gathered[i * n + k] = U_inlet[k]; 
+        for (int j = 0; j < Ny; ++j) {
+            for (int i = 0; i < Nx; ++i) {
+                for (int k = 0; k < n; ++k) {
+                    int idx = (j * Nx + i) * n + k; // flattened index: cell-major, then state variable
+                    U_gathered[idx] = U_inlet[k];
+                }
             }
         }
     }
 
-    Vector recv_buf(Nx_local * Ny * n); 
+    // Prepare receive buffer on each rank for local cells (without ghosts)
+    Vector recv_buf(Nx_local * Ny * n, 0.0);
 
-    MPI_Scatter(U_gathered.data(), Nx_local * Ny * n, MPI_DOUBLE,
+    // Example setup (adjust if you already have this from previous code):
+    offset = 0; 
+    for (int r = 0; r < size; ++r) {
+        sendcounts[r] = local_Nx[r] * Ny * n;
+        displacements[r] = offset; // offset in terms of doubles, not cells!
+        offset += local_Nx[r] * Ny * n;
+    }
+
+    // Scatter the U data across ranks (full cells only, no ghosts)
+    MPI_Scatterv(U_gathered.data(), sendcounts.data(), displacements.data(), MPI_DOUBLE,
                 recv_buf.data(), Nx_local * Ny * n, MPI_DOUBLE,
                 0, MPI_COMM_WORLD);
 
+    // Copy scattered data into local U array including ghost cells (offset by 1)
     for (int j = 0; j < Ny; ++j) {
         for (int i = 0; i < Nx_local; ++i) {
             for (int k = 0; k < n; ++k) {
-                int idx_recv = k * Nx_local * Ny + j * Nx_local + i;
-                int idx_local = k * (Nx_local + 2) * (Ny + 2) + (j + 1) * (Nx_local + 2) + (i + 1);
+                int idx_recv = (j * Nx_local + i) * n + k; // index in recv_buf
+                int idx_local = ((j + 1) * (Nx_local + 2) + (i + 1)) * n + k; // index in local U with ghost cells
                 U[idx_local] = recv_buf[idx_recv];
             }
         }
-    }    
+    } 
+
+
 }
 void Solver2D::exchange_ghost_cells() {
     MPI_Status status_left, status_right;
