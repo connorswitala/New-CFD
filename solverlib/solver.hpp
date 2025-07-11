@@ -68,8 +68,8 @@ private:
     string save_filename;
 
     // CFD data structures
-    Vector U, U_inlet, U_gathered, iFlux, jFlux, iPlus_A, iMinus_A, jPlus_A, jMinus_A, irho_A, jrho_A, V, V1, V2, Q, W, int1, int2, int3, UL, UR;
-    
+    Vector U, U_inlet, U_gathered, iE, jE, iFlux, jFlux, iPlus_A, iMinus_A, jPlus_A, jMinus_A, irho_A, jrho_A, V, V1, V2, Q, W, int1, int2, int3, UL, UR;
+    Vector local_Nx;
     // Grid data structures
     Vector xCenter, yCenter, Volume, iFxNorm, iFyNorm, jFxNorm, jFyNorm, iArea, jArea;
     
@@ -88,6 +88,8 @@ public:
 
     void solve();
     void exchange_ghost_cells();
+    Vector inviscid_boundary_U(BCType type, const double* U, double x_norm, double y_norm);
+    Vector inviscid_boundary_E(BCType type, double x_norm, double y_norm);
     void compute_dt();
     void compute_fluxes();
     void line_relaxation();

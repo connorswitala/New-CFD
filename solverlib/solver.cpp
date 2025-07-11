@@ -299,29 +299,28 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, BCMap BCs) : Nx(N
     t = 0.0; 
 
     /** 
-     *
      *      local_Nx(size) creates a vector that holds how many columns each rank gets. This is important 
      * since we want to use any number of processes for any number of cells in the x-direction. It will have size
      * Nx / size (+1 if r < remainder of Nx_global / size).
-     * 
-     *      disp(size) creates a vector that holds the starting column number for each rank. This is the running sum
-     * of local_Nx.
      * 
      *      sendcounts(size) creates a vector that holds how many elements to send to each rank. Since it is the total 
      * number of cells being sent for a block, it will have size local_Nx[r] * Ny.
      * 
      *      displacements(size) is the starting index in the sendbuf for rank r.
      */
-    vector<int> local_Nx(size), sendcounts(size), displacements(size);
+    vector<int> local_Nx(size), cc_sendcounts(size), cc_displacements(size), 
+                if_sendcounts(size), if_displacements(size) , 
+                jf_sendcounts(size), jf_displacements(size);
+
     int base = Nx / size;
     int rem = Nx % size; 
 
-    int offset = 0;
+    int cc_offset = 0;
     for (int r = 0; r < size; ++r) {
         local_Nx[r]       = base + (r < rem ? 1 : 0);
-        displacements[r]  = offset;
-        sendcounts[r]     = local_Nx[r] * Ny;
-        offset           += local_Nx[r] * Ny;
+        cc_displacements[r]  = cc_offset;
+        cc_sendcounts[r]     = local_Nx[r] * Ny;
+        cc_offset           += local_Nx[r] * Ny;
     }
 
     int Nx_local = local_Nx[rank]; 
@@ -345,71 +344,76 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, BCMap BCs) : Nx(N
     irho_A = Vector( num_ifaces * n * n, 0.0);
     jrho_A = Vector( num_jfaces * n * n, 0.0); 
 
-    // Local geometry data structures for each rank and scattering. 
+    // These hold the E matrices that never change for the boundary conditions. The first
+    // indice is for left or bottom, while the second is for right and top. 
+    iE = Vector( 2 * (Nx_local + 1) * n * n, 0.0);
+    jE = Vector(2 * (Ny + 1) * n * n, 0.0); 
+
+    // =========== Local geometry data structures for each rank and scattering. ============== 
 
     // Scatter xCenters from grid into new vectors
-    Vector xCenter(Nx_local * Ny, 0.0);  
-    MPI_Scatterv(grid.x_cellCenters.data(), sendcounts.data(), displacements.data(), MPI_DOUBLE,
+    Vector xCenter(num_loc_cells, 0.0);  
+    MPI_Scatterv(grid.x_cellCenters.data(), cc_sendcounts.data(), cc_displacements.data(), MPI_DOUBLE,
                  xCenter.data(), num_loc_cells, MPI_DOUBLE,
                  0, MPI_COMM_WORLD); 
 
     // Scatter yCenters from grid into new vectors
-    Vector yCenter(Nx_local * Ny, 0.0); 
-    MPI_Scatterv(grid.y_cellCenters.data(), sendcounts.data(), displacements.data(), MPI_DOUBLE,
+    Vector yCenter(num_loc_cells, 0.0); 
+    MPI_Scatterv(grid.y_cellCenters.data(), cc_sendcounts.data(), cc_displacements.data(), MPI_DOUBLE,
                  yCenter.data(), num_loc_cells, MPI_DOUBLE,
                  0, MPI_COMM_WORLD); 
 
     // Scatter volumes form grid into new vectors
-    Vector Volume(Nx_local * Ny, 0.0); 
-    MPI_Scatterv(grid.cellVolumes.data(), sendcounts.data(), displacements.data(), MPI_DOUBLE,
+    Vector Volume(num_loc_cells, 0.0); 
+    MPI_Scatterv(grid.cellVolumes.data(), cc_sendcounts.data(), cc_displacements.data(), MPI_DOUBLE,
                  Volume.data(), num_loc_cells, MPI_DOUBLE,
                  0, MPI_COMM_WORLD); 
 
     // For i-faces now
-    int face_offset = 0;
+    int iface_offset = 0;
     for (int r = 0; r < size; ++r) {
-        sendcounts[r]    = (local_Nx[r] + 1) * Ny; // includes overlap
-        displacements[r] = face_offset;
-        face_offset     += (local_Nx[r] + 1) * Ny;
+        if_sendcounts[r]    = (local_Nx[r] + 1) * Ny; // includes overlap
+        if_displacements[r] = iface_offset;
+        iface_offset     += (local_Nx[r] + 1) * Ny;
     }
 
     // Scatter i-face normals and areas
     Vector iFxNorm(num_ifaces, 0.0);
-    MPI_Scatterv(grid.iface_xNormals.data(), sendcounts.data(), displacements.data(), MPI_DOUBLE,
+    MPI_Scatterv(grid.iface_xNormals.data(), if_sendcounts.data(), if_displacements.data(), MPI_DOUBLE,
                  iFxNorm.data(), num_ifaces, MPI_DOUBLE,
                  0, MPI_COMM_WORLD); 
 
     Vector iFyNorm(num_ifaces, 0.0);
-    MPI_Scatterv(grid.iface_yNormals.data(), sendcounts.data(), displacements.data(), MPI_DOUBLE,
+    MPI_Scatterv(grid.iface_yNormals.data(), if_sendcounts.data(), if_displacements.data(), MPI_DOUBLE,
                  iFyNorm.data(), num_ifaces, MPI_DOUBLE,
                  0, MPI_COMM_WORLD); 
 
     Vector iArea(num_ifaces, 0.0);
-    MPI_Scatterv(grid.iAreas.data(), sendcounts.data(), displacements.data(), MPI_DOUBLE,
+    MPI_Scatterv(grid.iAreas.data(), if_sendcounts.data(), if_displacements.data(), MPI_DOUBLE,
                  iArea.data(), num_ifaces, MPI_DOUBLE,
                  0, MPI_COMM_WORLD);              
 
     // For j-faces now
-    face_offset = 0;
+    int jface_offset = 0;
     for (int r = 0; r < size; ++r) {
-        sendcounts[r]    = local_Nx[r] * (Ny + 1); // includes overlap
-        displacements[r] = face_offset;
-        face_offset     += local_Nx[r] * (Ny + 1);
+        jf_sendcounts[r]    = local_Nx[r] * (Ny + 1); // includes overlap
+        jf_displacements[r] = jface_offset;
+        jface_offset     += local_Nx[r] * (Ny + 1);
     }
 
     // Scatter j-face normals and areas
     Vector jFxNorm(num_jfaces, 0.0);
-    MPI_Scatterv(grid.jface_xNormals.data(), sendcounts.data(), displacements.data(), MPI_DOUBLE,
+    MPI_Scatterv(grid.jface_xNormals.data(), jf_sendcounts.data(), jf_displacements.data(), MPI_DOUBLE,
                  jFxNorm.data(), num_jfaces, MPI_DOUBLE,
                  0, MPI_COMM_WORLD); 
 
     Vector jFyNorm(num_jfaces, 0.0);
-    MPI_Scatterv(grid.jface_yNormals.data(), sendcounts.data(), displacements.data(), MPI_DOUBLE,
+    MPI_Scatterv(grid.jface_yNormals.data(), jf_sendcounts.data(), jf_displacements.data(), MPI_DOUBLE,
                  jFyNorm.data(), num_jfaces, MPI_DOUBLE,
                  0, MPI_COMM_WORLD); 
 
     Vector jArea(num_jfaces, 0.0);
-    MPI_Scatterv(grid.jAreas.data(), sendcounts.data(), displacements.data(), MPI_DOUBLE,
+    MPI_Scatterv(grid.jAreas.data(), jf_sendcounts.data(), jf_displacements.data(), MPI_DOUBLE,
                  jArea.data(), num_jfaces, MPI_DOUBLE,
                  0, MPI_COMM_WORLD); 
 
@@ -429,7 +433,7 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, BCMap BCs) : Nx(N
         for (int j = 0; j < Ny; ++j) {
             for (int i = 0; i < Nx; ++i) {
                 for (int k = 0; k < n; ++k) {
-                    int idx = (j * Nx + i) * n + k; // flattened index: cell-major, then state variable
+                    int idx = (i * Ny + j) * n + k; // flattened index: cell-major, then state variable
                     U_gathered[idx] = U_inlet[k];
                 }
             }
@@ -438,17 +442,18 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, BCMap BCs) : Nx(N
 
     // Prepare receive buffer on each rank for local cells (without ghosts)
     Vector recv_buf(Nx_local * Ny * n, 0.0);
+    vector<int> u_sendcounts(size), u_displacements(size);
 
     // Example setup (adjust if you already have this from previous code):
-    offset = 0; 
+    int u_offset = 0; 
     for (int r = 0; r < size; ++r) {
-        sendcounts[r] = local_Nx[r] * Ny * n;
-        displacements[r] = offset; // offset in terms of doubles, not cells!
-        offset += local_Nx[r] * Ny * n;
+        u_sendcounts[r] = local_Nx[r] * Ny * n;
+        u_displacements[r] = u_offset; // offset in terms of doubles, not cells!
+        u_offset += local_Nx[r] * Ny * n;
     }
 
     // Scatter the U data across ranks (full cells only, no ghosts)
-    MPI_Scatterv(U_gathered.data(), sendcounts.data(), displacements.data(), MPI_DOUBLE,
+    MPI_Scatterv(U_gathered.data(), u_sendcounts.data(), u_displacements.data(), MPI_DOUBLE,
                 recv_buf.data(), Nx_local * Ny * n, MPI_DOUBLE,
                 0, MPI_COMM_WORLD);
 
@@ -456,8 +461,8 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, BCMap BCs) : Nx(N
     for (int j = 0; j < Ny; ++j) {
         for (int i = 0; i < Nx_local; ++i) {
             for (int k = 0; k < n; ++k) {
-                int idx_recv = (j * Nx_local + i) * n + k; // index in recv_buf
-                int idx_local = ((j + 1) * (Nx_local + 2) + (i + 1)) * n + k; // index in local U with ghost cells
+                int idx_recv = (i * Ny + j) * n + k; // index in recv_buf
+                int idx_local = ((i + 1) * (Ny + 2) + (j + 1)) * n + k; // index in local U with ghost cells
                 U[idx_local] = recv_buf[idx_recv];
             }
         }
@@ -465,24 +470,97 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, BCMap BCs) : Nx(N
 
 
 }
+
+Vector Solver2D::inviscid_boundary_U(BCType type, const double* U, double x_norm, double y_norm) {
+    Vector ghost(n * n, 0.0); 
+
+    return ghost; 
+
+}
+
+Vector Solver2D::inviscid_boundary_E(BCType type, double x_norm, double y_norm) {
+
+    Vector E(n * n, 0.0); 
+
+    switch (type) {
+        
+    case BCType::Inlet: 
+        return E;
+    
+    case BCType::Outlet:
+        return identity(n); 
+
+    case BCType::IsothermalWall:
+        E = {1, 0, 0, 0,
+            0, 1 - 2 * x_norm * x_norm, -2 * x_norm * y_norm, 0,
+            0, 2 - x_norm * y_norm, 1 - 2 * y_norm * y_norm, 0,
+            0, 0, 0, 1};
+        return E;
+
+    case BCType::AdiabaticWall:
+        E = {1, 0, 0, 0,
+            0, 1 - 2 * x_norm * x_norm, -2 * x_norm * y_norm, 0,
+            0, 2 - x_norm * y_norm, 1 - 2 * y_norm * y_norm, 0,
+            0, 0, 0, 1};
+        return E;
+
+    case BCType::Symmetry:
+        E = {1, 0, 0, 0,
+                0, 1 - 2 * x_norm * x_norm, -2 * x_norm * y_norm, 0,
+                0, 2 - x_norm * y_norm, 1 - 2 * y_norm * y_norm, 0,
+                0, 0, 0, 1};
+        return E;
+
+    default:
+        throw invalid_argument("Unknown boundary condition type.");        
+    }
+}
+
+
 void Solver2D::exchange_ghost_cells() {
     MPI_Status status_left, status_right;
 
-    int col_size = Ny * n;
+    int col_size = Ny * n; // Exchange all variables for entire column of Ny cells. 
 
     Vector send_left(col_size), recv_left(col_size);
     Vector send_right(col_size), recv_right(col_size);
 
+    /** This nested for loop creates vectors for each rank that just holds the innermost
+     * real cells of the rank's chunk. These will be used to put into the ghost cell column of
+     * the neighboring rank. 
+     */
+
+
     for (int j = 0; j < Ny; ++j) {
         for (int k = 0; k < n; ++k) {
 
-            int local_left = k * (Nx_local + 2) * (Ny + 2) + (j + 1) * (Nx_local + 2) + 1;
-            int local_right = k * (Nx_local + 2) * (Ny + 2) + (j + 1) * (Nx_local + 2) + Nx_local;
+            int local_left = (1 * (Ny + 2) + (j + 1)) * n + k;
+            int local_right = (Nx_local * (Ny + 2) + (j + 1)) * n + k;
 
             send_left[j * n + k] = U[local_left];
             send_right[j * n + k] = U[local_right];
         }
     }
+
+    /** This part sends and receives the left or right column depending on the if condition.  
+     * If rank > 0, then it send the left column since rank 0 doesnt send. If rank < size - 1, 
+     * it sends the right column since rank <size - 1> doesn't have a right column to send. 
+     * MPI_Sendrecv looks like this:
+     * 
+     * MPI_Sendrecv(    <data being send>
+     *                  <number of data points being sent>
+     *                  <MPI data type being sent>
+     *                  <destination of sent data>
+     *                  <send tag(just needs to be different)>
+     *                  <place to receive data>
+     *                  <number of data points being received>
+     *                  <MPI data type>
+     *                  <source of received data>
+     *                  <receive tag>
+     *                  <communication>
+     *                  <MPI_status *status>
+     *                                              )
+    */
 
     if (rank > 0) {
         MPI_Sendrecv(send_left.data(), col_size, MPI_DOUBLE, rank - 1, 0,
@@ -497,17 +575,23 @@ void Solver2D::exchange_ghost_cells() {
     }
 
 
+    /** This nested for loop takes the send and receive buffs and puts the data
+     * from it into the ghost cell spots for each rank. 
+     */
+
     for (int j = 0; j < Ny; ++j) {
         for (int k = 0; k < n; ++k) {
+
             if (rank > 0) {
-                int ghost_left = k * (Nx_local + 2) * (Ny + 2) + (j + 1) * (Nx_local + 2);
+                int ghost_left = (0 * (Ny + 2) + (j + 1)) * n + k;
                 U[ghost_left] = recv_left[j * n + k];
             }
 
             if (rank < size - 1) {
-                int ghost_right = k * (Nx_local + 2) * (Ny + 2) + (j + 1) * (Nx_local + 2) + (Nx_local + 1);
+                int ghost_right = (Nx_local * (Ny + 2) + (j + 1)) * n + k;
                 U[ghost_right] = recv_right[j * n + k];
             }
+
         }
     }
 
