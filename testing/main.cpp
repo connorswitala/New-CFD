@@ -1,18 +1,24 @@
 #include <fstream>
 #include <iostream>
-#include "../writefilelib/writefile.hpp"
+#include "../linalglib/linalg.hpp"
 using namespace std;
 
 int main() {
     
-    string filename = "../plotfiles/newgridtesting.dat";
+    const int n = 4, m = 1;
+    double A[n * n] = { 4, 3, 0, 0, 3, 4, -1, 0, 0, -1, 4, 2, 0, 0, 2, 4 };
+    double B[n * m] = { 24, 30, -24, -24 };
+    double X[n * m];
 
-    int Nx = 200, Ny = 100;
+    matrix_divide(A, B, X, n, m);
 
-    RampGrid grid(Nx, Ny, 3, 0.75, 15); 
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < m; ++j) {
+            cout << X[j * n + i] << " ";
+        }
+        cout << endl;
+    }
 
-    // cout << "i-face x normal: " << grid.iface_xNorm(Nx / 2, Ny / 2) << "\t i-face y normal: " << grid.iface_yNorm(Nx / 2, Ny / 2);
-    // cout << "j-face x normal: " << grid.jface_xNorm(Nx / 2, Ny / 2) << "\t j-face y normal: " << grid.jface_yNorm(Nx / 2, Ny / 2);
-    // output_grid(grid, Nx, Ny, filename); 
+
     return 0;
 }

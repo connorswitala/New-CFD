@@ -10,20 +10,23 @@ void primtocons(double* U, const double* V, const int dimensions);
 void constoprim(const double* U, double* V, const int dimensions);
 
 
-inline double computeInternalEnergy(const double* U, int dimensions) {
+inline double computeInternalEnergy(const double* U, int n_vel) {
     double udotu = 0.0;
-    for (int i = 0; i < dimensions; ++i) {
+    for (int i = 0; i < n_vel; ++i) {
         udotu += U[i + 1] * U[i + 1]; 
     }
 
-    return U[dimensions + 1] / U[0] - 0.5 / (U[0] * U[0]) * udotu;   
+    return U[n_vel + 1] / U[0] - 0.5 / (U[0] * U[0]) * udotu;   
 }
-inline double computePressure(const double* U, int dimensions) {
+inline double computePressure(const double* U, int n_vel) {
     double udotu = 0.0;
-    for (int i = 0; i < dimensions; ++i) {
+    for (int i = 0; i < n_vel; ++i) {
         udotu += U[i + 1] * U[i + 1]; 
     }
-    return (U[dimensions + 1] - 0.5 / (U[0] * U[0]) * udotu) * (perfgam - 1);
+    return (U[n_vel + 1] - 0.5 / (U[0] * U[0]) * udotu) * (perfgam - 1);
+}
+inline double compute_total_enthalpy(const double* U, int n_vel) {
+    return (U[n_vel + 1] + computePressure(&U[0], n_vel)) / U[0]; 
 }
 
 
@@ -68,8 +71,10 @@ private:
     string save_filename;
 
     // CFD data structures
-    Vector U, U_inlet, U_gathered, iE, jE, iFlux, jFlux, iPlus_A, iMinus_A, jPlus_A, jMinus_A, irho_A, jrho_A, V, V1, V2, Q, W, int1, int2, int3, UL, UR;
+    Vector U, U_inlet, U_gathered, dU_old, dU_new, iEL, iER, jEB, jET, iFlux, jFlux, iPlus_A, iMinus_A, 
+        jPlus_A, jMinus_A, irho_A, jrho_A, V, V1, V2, Q, W, int1, int2, int3, UL, UR;
     Vector local_Nx;
+    
     // Grid data structures
     Vector xCenter, yCenter, Volume, iFxNorm, iFyNorm, jFxNorm, jFyNorm, iArea, jArea;
     
@@ -82,19 +87,24 @@ public:
 
     Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, BCMap BCs); 
 
-    int cell_index(int i, int j, int k);
-    int x_index(int i, int j, int k);
-    int y_index(int i, int j, int k);
-
     void solve();
+
     void exchange_ghost_cells();
-    Vector inviscid_boundary_U(BCType type, const double* U, double x_norm, double y_norm);
-    Vector inviscid_boundary_E(BCType type, double x_norm, double y_norm);
+    void form_inviscid_boundary_U(); 
+    Vector get_U_values(BCType type, double* U_inner, double x_norm, double y_norm);
+    void form_inviscid_boundary_E();
+    Vector get_E_values(BCType type, double x_norm, double y_norm);
+
     void compute_dt();
-    void compute_fluxes();
-    void line_relaxation();
-    void update_U();
     void compute_inner_res();
     void compute_outer_res();
+
+    void compute_ifluxes();
+    void compute_jfluxes(); 
+    void compute_rho_fluxes(); 
+    void relax_left_line();
+    void relax_inner_lines();
+    void relax_right_line(); 
+    void update_U();
 
 };

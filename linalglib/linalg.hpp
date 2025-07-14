@@ -28,3 +28,5 @@ void vecvec_sub(const double* vec1, const double* vec2, double* res, int n);
 void matvec_mult(const double* mat, const double* vec, double* res, int n);
 void matmat_add(const double* mat1, const double* mat2, double* res, int n);
 void matmat_sub(const double* mat1, const double* mat2, double* res, int n);
+void matrix_divide(double* A, const double* B, double* X, int n, int m);
+void matmat_mult(const double* mat1, const double* mat2, double* res, int n); 
