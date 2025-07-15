@@ -1,10 +1,42 @@
-#include "../writefilelib/writefile.hpp" 
+#include "../linalglib/linalg.hpp"
 #include <mpi.h>
 #include <fstream>
+#include <iomanip> 
+#include <cmath> 
+#include <memory>
 
 // Constant values for number of variables
 constexpr double perfgam = 1.4;
 constexpr double perfR = 287.0;
+
+// This enum class is for setting boundary conditions types
+enum class BCType {
+	IsothermalWall,
+	AdiabaticWall,
+	Inlet,
+	Outlet,
+	Symmetry,
+	Undefined
+};
+// This struct contains the boundary conditions types for each side of the grid (left, right, bottom, top) 
+struct BCMap {
+
+	BCType left;
+	BCType right;
+	BCType bottom;
+	BCType top;
+
+	BCMap(BCType left, BCType right, BCType bottom, BCType top) : left(left), right(right), bottom(bottom), top(top) {}
+
+};
+
+struct Point {
+    double x;
+    double y;
+
+    Point(double x_val = 0.0, double y_val = 0.0) : x(x_val), y(y_val) {};
+};
+
 
 void primtocons(double* U, const double* V, const int dimensions);
 void constoprim(const double* U, double* V, const int dimensions);
@@ -65,9 +97,9 @@ private:
     int n_vel = 2;
     int n = 4;
 
-    int Nx, Ny, Nx_local, Ny_local, N_cells, N_local;
+    int Nx, Ny, Nx_local, N_cells, N_local;
     int num_cells, num_ifaces, num_jfaces, num_loc_cells, num_gathered_cells; 
-    double CFL, dt, t;
+    double CFL, dt, t, outer_res, inner_res;
     string save_filename;
 
     // CFD data structures
@@ -78,14 +110,20 @@ private:
     // Grid data structures
     Vector xCenter, yCenter, Volume, iFxNorm, iFyNorm, jFxNorm, jFyNorm, iArea, jArea;
     
-    Grid& grid;
+    Vector x_vertices, y_vertices, x_cellCenters, y_cellCenters,
+		iface_xNormals,	iface_yNormals, jface_xNormals, jface_yNormals,
+		iAreas,	jAreas,
+		cellVolumes;
+
+    Vector A, B, C, F, v, g, alpha, result_vector1, result_vector2, result_matrix, I; 
+    
     BCMap BCs; 
 
 public:
 
     int rank, size;
 
-    Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, BCMap BCs); 
+    Solver2D(int Nx, int Ny, double CFL, Vector U_inlet); 
 
     void solve();
 
@@ -106,5 +144,7 @@ public:
     void relax_inner_lines();
     void relax_right_line(); 
     void update_U();
+
+    void create_ramp_grid(double L, double inlet_height, double ramp_angle);
 
 };

@@ -4,7 +4,6 @@ CXXFLAGS  := -std=c++17 -O2 -Wall -I./linalglib -I./solverlib
 
 # ==== Directories ====
 LIN_DIR       := linalglib
-GRID_DIR	  := gridlib
 WRITE_DIR	  := writefilelib
 TEST_DIR      := testing
 BUILD_DIR     := build
@@ -16,9 +15,6 @@ SOLVER_DIR 	  := solverlib
 # ==== Files ====
 LIN_SRC    := $(LIN_DIR)/linalg.cpp
 LIN_OBJ    := $(BUILD_DIR)/linalg.o
-
-GRID_SRC   := $(GRID_DIR)/grid.cpp
-GRID_OBJ   := $(BUILD_DIR)/grid.o
 
 WRITE_SRC	:= $(WRITE_DIR)/writefile.cpp
 WRITE_OBJ	:= $(BUILD_DIR)/writefile.o
@@ -52,11 +48,8 @@ $(PROGRAMS_DIR):
 $(LIN_OBJ): $(LIN_SRC) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(GRID_OBJ): $(GRID_SRC) | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) -c $< -o $@
-
-$(WRITE_OBJ): $(WRITE_SRC) | $(BUILD_DIR)
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+# $(WRITE_OBJ): $(WRITE_SRC) | $(BUILD_DIR)
+# 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(SOD_OBJ): $(SOD_SRC) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
@@ -77,7 +70,7 @@ $(CFDSOLVER_TARGET): $(CFDSOLVER_OBJ) $(LIN_OBJ) $(SOLVER_OBJ) | $(PROGRAMS_DIR)
 $(SOD_TARGET): $(SOD_OBJ) $(LIN_OBJ) | $(PROGRAMS_DIR)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
-$(TEST_TARGET): $(TEST_OBJ) $(LIN_OBJ) $(GRID_OBJ) $(WRITE_OBJ) | $(PROGRAMS_DIR)
+$(TEST_TARGET): $(TEST_OBJ) $(LIN_OBJ) | $(PROGRAMS_DIR)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 # ==== Clean ====

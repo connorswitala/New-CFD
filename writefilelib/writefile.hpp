@@ -3,7 +3,6 @@
 #include <fstream> 
 #include <iomanip>
 #include <iostream>
-#include "../gridlib/grid.hpp"
 #include "../linalglib/linalg.hpp"
 
 #define BLUE "\033[34m"

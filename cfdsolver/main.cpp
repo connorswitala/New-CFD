@@ -2,24 +2,22 @@
 
 
 int main(int argc, char* argv[]) {
-    
+
+    int Nx = 100, Ny = 50;
+    double CFL = 1.0; 
+
+
+    Vector V_inlet = {0.01, 1000, 0.0, 10000};
+    Vector U_inlet(4, 0.0);
+
+    primtocons(U_inlet.data(), V_inlet.data(), 2);
+
     MPI_Init(&argc, &argv);
 
-    double start_time = MPI_Wtime(); 
+    Solver2D solver(Nx, Ny, CFL, U_inlet);
 
-    int Nx = 10000; 
-    double CFL = 0.9; 
+    solver.solve(); 
+ 
+    MPI_Finalize(); 
 
-    SodSolver1D solver(Nx, CFL);
-    solver.solve();  
-
-    double end_time = MPI_Wtime();    // End timer
-    double elapsed = end_time - start_time;
-
-    if (solver.rank == 0) {
-        std::cout << "Elapsed time: " << elapsed << " seconds\n";
-    }
-
-    MPI_Finalize();
-    return 0;
 }
