@@ -316,11 +316,12 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet) : Nx(Nx), Ny(Ny),
 
 
     create_ramp_grid(3, 1, 15); 
-    if (rank == 0) cout << "Geometry created succesfully and scattered t all rank." << endl; 
+    if (rank == 0) cout << endl << "-> Geometry created succesfully and scattered to all ranks. \n\n"; 
+
     U_gathered = Vector( num_gathered_cells * n, 0.0); 
     U = Vector(((Nx_local + 2) * (Ny + 2)) * n, 0.0);  
-    dU_old = Vector(Nx_local * Ny * n, 0.0); 
-    dU_new = Vector(Nx_local * Ny * n, 0.0); 
+    dU_old = Vector((Nx_local + 2) * (Ny + 2) * n, 0.0); 
+    dU_new = Vector((Nx_local + 2) * (Ny + 2) * n, 0.0); 
 
     // Important Flux Vectors
     iFlux = Vector( num_ifaces * n, 0.0);
@@ -333,6 +334,18 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet) : Nx(Nx), Ny(Ny),
     jMinus_A = Vector( num_jfaces * n * n, 0.0);
     irho_A = Vector( num_ifaces * n * n, 0.0);
     jrho_A = Vector( num_jfaces * n * n, 0.0); 
+
+
+    // For flux calculations:
+    Vi = Vector(n); 
+    Vii = Vector(n);
+    Vj = Vector(n);
+    Vjj = Vector(n);
+    Vp = Vector(n);
+    Vp = Vector(n);
+    Vm = Vector(n);
+    F_plus = Vector(n);
+    F_minus = Vector(n);
 
     // For line relaxation
     A = Vector(n * n); 
@@ -374,12 +387,10 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet) : Nx(Nx), Ny(Ny),
             }
         }
     }
-    if (rank == 0) cout << "U initialized!" << endl;
+    if (rank == 0) cout << "-> U initialized! \n\n";
     
     form_inviscid_boundary_E(); 
-    if (rank == 0) cout << "form_inviscid_boundary_E succesfully called and completed!" << endl;
-    exchange_ghost_cells(); 
-    if (rank == 0) cout << "exchange_ghost_cells successfully called and completed!" << endl;
+    if (rank == 0) cout << "-> form_inviscid_boundary_E successfully called and completed. \n\n";
 }
 
 
@@ -570,8 +581,11 @@ void Solver2D::exchange_ghost_cells() {
 
     int col_size = Ny * n; // Exchange all variables for entire column of Ny cells. 
 
-    Vector send_left(col_size), recv_left(col_size);
-    Vector send_right(col_size), recv_right(col_size);
+    Vector send_leftU(col_size), recv_leftU(col_size);
+    Vector send_rightU(col_size), recv_rightU(col_size);
+
+    Vector send_leftdU(col_size), recv_leftdU(col_size);
+    Vector send_rightdU(col_size), recv_rightdU(col_size);
 
     /** This nested for loop creates vectors for each rank that just holds the innermost
      * real cells of the rank's chunk. These will be used to put into the ghost cell column of
@@ -585,8 +599,11 @@ void Solver2D::exchange_ghost_cells() {
             int local_left = (1 * (Ny + 2) + (j + 1)) * n + k;
             int local_right = (Nx_local * (Ny + 2) + (j + 1)) * n + k;
 
-            send_left[j * n + k] = U[local_left];
-            send_right[j * n + k] = U[local_right];
+            send_leftU[j * n + k] = U[local_left];
+            send_rightU[j * n + k] = U[local_right];
+
+            send_leftdU[j * n + k] = dU_old[local_left];
+            send_rightdU[j * n + k] = dU_old[local_right];
         }
     }
 
@@ -611,15 +628,23 @@ void Solver2D::exchange_ghost_cells() {
     */
 
     if (rank > 0) {
-        MPI_Sendrecv(send_left.data(), col_size, MPI_DOUBLE, rank - 1, 0,
-                     recv_left.data(), col_size, MPI_DOUBLE, rank - 1, 1,
+        MPI_Sendrecv(send_leftU.data(), col_size, MPI_DOUBLE, rank - 1, 0,
+                     recv_leftU.data(), col_size, MPI_DOUBLE, rank - 1, 1,
+                     MPI_COMM_WORLD, &status_left);
+
+        MPI_Sendrecv(send_leftdU.data(), col_size, MPI_DOUBLE, rank - 1, 0,
+                     recv_leftdU.data(), col_size, MPI_DOUBLE, rank - 1, 0,
                      MPI_COMM_WORLD, &status_left);
     }
 
     if (rank < size - 1) {
-        MPI_Sendrecv(send_right.data(), col_size, MPI_DOUBLE, rank + 1, 1,
-                     recv_right.data(), col_size, MPI_DOUBLE, rank + 1, 0,
+        MPI_Sendrecv(send_rightU.data(), col_size, MPI_DOUBLE, rank + 1, 1,
+                     recv_rightU.data(), col_size, MPI_DOUBLE, rank + 1, 0,
                      MPI_COMM_WORLD, &status_right);
+
+        MPI_Sendrecv(send_rightdU.data(), col_size, MPI_DOUBLE, rank + 1, 1,
+                     recv_rightdU.data(), col_size, MPI_DOUBLE, rank + 1, 0,
+                     MPI_COMM_WORLD, &status_right); 
     }
 
 
@@ -632,19 +657,22 @@ void Solver2D::exchange_ghost_cells() {
 
             if (rank > 0) {
                 int ghost_left = (0 * (Ny + 2) + (j + 1)) * n + k;
-                U[ghost_left] = recv_left[j * n + k];
+                U[ghost_left] = recv_leftU[j * n + k];
+
+                dU_old[ghost_left] = recv_leftdU[j * n + k];
             }
 
             if (rank < size - 1) {
                 int ghost_right = (Nx_local * (Ny + 2) + (j + 1)) * n + k;
-                U[ghost_right] = recv_right[j * n + k];
+                U[ghost_right] = recv_rightU[j * n + k];
+
+                dU_old[ghost_right] = recv_rightdU[j * n + k];
             }
 
         }
     }
 
     form_inviscid_boundary_U(); 
-
 }
 
 
@@ -652,49 +680,97 @@ void Solver2D::solve() {
 
     int counter= 0;
 
-    while (outer_res >= 1e-7) {
+    while (counter < 1) {
 
-        if (rank == 0) cout << "Iteration: " << counter << endl; 
+        if (rank == 0) cout << "-> Iteration: " << counter << endl << endl; 
         exchange_ghost_cells();
+        if (rank == 0) cout << "-> Ghost cells exchanged and set. \n\n";
         MPI_Barrier(MPI_COMM_WORLD);
-
-        if (rank == 0) cout << "Ghost cells exchanges and set." << endl;
         compute_dt();
+        if (rank == 0) cout << "-> dt computed. \n\n";
         MPI_Barrier(MPI_COMM_WORLD);
+        int in_counter = 0;
 
-        if (rank == 0) cout << "dt computed" << endl;
-
-        while (inner_res >= 1e-8) {
+        while (in_counter < 1) {
 
             compute_ifluxes();
-            if (rank == 0) cout << "i-Fluxes computed" << endl;
+            if (rank == 0) cout << "-> i-Fluxes computed. \n\n";
             MPI_Barrier(MPI_COMM_WORLD);
+
+            cout << "i-fluxes: " << endl;
+            for (int i = 0; i < Nx_local + 1; ++i) {
+                for (int j = 0; j < Ny; ++j) {
+                    cout << i << ", " << j << ": ";
+                    for (int k = 0; k < n; ++k) {
+                        cout << iFlux[(i * (Ny) + j) * n + k] << " ";
+                    }
+                    cout << endl;                
+                }
+            }
+
 
             compute_jfluxes();
-            if (rank == 0) cout << "j-Fluxes computed" << endl;
+            if (rank == 0) cout << "-> j-Fluxes computed. \n\n";
             MPI_Barrier(MPI_COMM_WORLD);
+
+            cout << "j-fluxes: " << endl;
+            for (int i = 0; i < Nx_local; ++i) {
+                for (int j = 0; j < Ny + 1; ++j) {
+                    cout << i << ", " << j << ": ";
+                    for (int k = 0; k < n; ++k) {
+                        cout << jFlux[(i * (Ny) + j) * n + k] << " ";
+                    }
+                    cout << endl;
+                
+                }
+            }
+
 
             relax_left_line();
-            if (rank == 0) cout << "left-line relaxed" << endl;         
+            if (rank == 0) cout << "-> left-line relaxed. \n\n";         
             MPI_Barrier(MPI_COMM_WORLD);
 
+
+            cout << "dU_new left line: " << endl;
+            for (int j = 0; j < Ny + 2; ++j) {
+                for (int k = 0; k < n; ++k) {
+                    cout << dU_new[(1 * (Ny + 2) + j) * n + k] << " ";
+                }
+                cout << endl;            
+            }
+            
+
             relax_inner_lines();
-            if (rank == 0) cout << "middle lines relaxed" << endl;
+            if (rank == 0) cout << "-> middle lines relaxed. \n\n";
+            MPI_Barrier(MPI_COMM_WORLD);
 
             relax_right_line(); 
-                cout << "right line relaxed" << endl;
-      
+                cout << "-> right line relaxed. \n\n";
+            MPI_Barrier(MPI_COMM_WORLD);
 
             swap(dU_new, dU_old);
+            for (int i = 0; i < Nx_local + 2; ++i) {
+                for (int j = 0; j < Ny + 2; ++j) {
+                    cout << i << ", " << j << ": ";
+                    for (int k = 0; k < n; ++k) {
+                        cout << dU_old[(i * (Ny + 2) + j) * n + k] << " ";
+                    }
+                    cout << endl;
+                
+                }
+            }
 
             compute_inner_res();
-            if (rank == 0) cout << "inner residual computed" << endl; 
+            if (rank == 0) cout << "-> inner residual computed: " << inner_res << "\n\n"; 
+            in_counter++;
+            cout << in_counter << endl;
         }
 
         update_U();
-        if (rank == 0) cout << "U updated" << endl; 
+        if (rank == 0) cout << "-> U updated. \n\n"; 
         compute_outer_res(); 
-        if (rank == 0) cout << "outer residual computed" << endl; 
+        if (counter == 0) outer_res = 1.0;
+        if (rank == 0) cout << "-> outer residual computed: " << outer_res << endl <<endl; 
 
         counter++;
 
@@ -703,6 +779,8 @@ void Solver2D::solve() {
                 << "\tResidual: " << fixed << scientific << setprecision(3) << outer_res
                 << "\tdt: " << fixed << scientific << setprecision(5) << dt << endl; 
     }
+
+    if (rank == 0) cout << "Exited main loop" << endl;
 
     Vector U_sendbuf(Nx_local * Ny * n, 0.0);
 
@@ -860,6 +938,7 @@ void Solver2D::create_ramp_grid(double L, double inlet_height, double ramp_angle
                 jface_xNormals[face_ij] = -CD.y / fabs(jAreas[face_ij]);
                 jface_yNormals[face_ij] = CD.x / fabs(jAreas[face_ij]);
 
+
                 // cout << "j area: " << fixed << setprecision(3) <<  jAreas[face_ij] 
                 // << "\tj-x norm: " << fixed << setprecision(3) << jface_xNormals[face_ij] 
                 // << "\tj-y norm: " << fixed << setprecision(3) << jface_yNormals[face_ij] << endl;
@@ -963,9 +1042,7 @@ void Solver2D::compute_ifluxes() {
 
     int ci, cii, fi; 
     double weight, pi, pii, dp, nx, ny, rho, u, v, p, ho, uprime, a, lp, lm, l, lt, lc;  
-    double g = 5.72; 
-
-    static Vector Vi(n, 0.0), Vii(n, 0.0), Vp(n, 0.0), Vm(n, 0.0), F_plus(n, 0.0), F_minus(n, 0.0);  
+    double g = 5.72, pe = perfgam - 1; 
 
     for (int i = 0; i < Nx_local + 1; ++i) {
         for (int j = 0; j < Ny; ++j) { 
@@ -993,12 +1070,12 @@ void Solver2D::compute_ifluxes() {
 
             // Positive flux calculation
 
-            rho = Vi[0];
-            u = Vi[1];
-            v = Vi[2];
-            p = Vi[3]; 
-            a = sqrt(perfgam * rho / p);  
-            ho = compute_total_enthalpy(&U[ci * n], n_vel);
+            rho = Vp[0];
+            u = Vp[1];
+            v = Vp[2];
+            p = Vp[3]; 
+            a = sqrt(perfgam * p / rho);  
+            ho = compute_total_enthalpy(Vp.data(), n_vel);
 
             uprime = u * nx + v * ny; 
 
@@ -1011,8 +1088,8 @@ void Solver2D::compute_ifluxes() {
             fill(int1.begin(), int1.end(), 0.0);
             for (int k = 0; k < n; ++k) int1[k * n + k] = l;
 
-            V1 = {lc/(a * a), (u * lc + a * nx * lt)/(a * a), (v * lc + a * ny + lt)/(a * a), (ho * lc + a * uprime * lt) / (a * a)};
-            Q = {0.5 * u * u * (perfgam - 1), -u * (perfgam - 1), -v * (perfgam - 1), perfgam - 1};
+            V1 = {lc / (a * a), (u * lc + a * nx * lt)/(a * a), (v * lc + a * ny * lt)/(a * a), (ho * lc + a * uprime * lt) / (a * a)};
+            Q = {0.5 * (u * u + v * v) * (perfgam - 1), -u * pe, -v * pe, pe};
 
             V2 = {lt / a, u * lt / a + nx * lc, v * lt / a + ny * lc, ho * lt / a + uprime * lc};
             W = {-uprime, nx, ny, 0}; 
@@ -1023,16 +1100,16 @@ void Solver2D::compute_ifluxes() {
             for (int k = 0; k < n * n; ++k) 
                 iPlus_A[fi * n * n + k]  = int1[k] + int2[k] + int3[k];
 
-            matvec_mult(&iPlus_A[fi * n * n], &U[ci * n], &F_plus[0], n);  
+            matvec_mult(&iPlus_A[fi * n * n], &U[ci * n], F_plus.data(), n);  
 
              // Negative flux calculation
 
-            rho = Vii[0];
-            u = Vii[1];
-            v = Vii[2];
-            p = Vii[3]; 
-            a = sqrt(perfgam * rho/p);  
-            ho = compute_total_enthalpy(&U[cii * n], n_vel);
+            rho = Vm[0];
+            u = Vm[1];
+            v = Vm[2];
+            p = Vm[3]; 
+            a = sqrt(perfgam * p / rho);  
+            ho = compute_total_enthalpy(Vm.data(), n_vel);
 
             uprime = u * nx + v * ny; 
 
@@ -1045,8 +1122,8 @@ void Solver2D::compute_ifluxes() {
             fill(int1.begin(), int1.end(), 0.0);
             for (int k = 0; k < n; ++k) int1[k * n + k] = l;
 
-            V1 = {lc/(a * a), (u * lc + a * nx * lt)/(a * a), (v * lc + a * ny + lt)/(a * a), (ho * lc + a * uprime * lt) / (a * a)};
-            Q = {0.5 * u * u * (perfgam - 1), -u * (perfgam - 1), -v * (perfgam - 1), perfgam - 1};
+            V1 = {lc / (a * a), (u * lc + a * nx * lt)/(a * a), (v * lc + a * ny * lt)/(a * a), (ho * lc + a * uprime * lt) / (a * a)};
+            Q = {0.5 * (u * u + v * v) * (perfgam - 1), -u * pe, -v * pe, pe};
 
             V2 = {lt / a, u * lt / a + nx * lc, v * lt / a + ny * lc, ho * lt / a + uprime * lc};
             W = {-uprime, nx, ny, 0}; 
@@ -1057,7 +1134,7 @@ void Solver2D::compute_ifluxes() {
             for (int k = 0; k < n * n; ++k) 
                 iMinus_A[fi * n * n + k]  = int1[k] + int2[k] + int3[k]; 
 
-            matvec_mult(&iMinus_A[fi * n * n], &U[cii * n], &F_minus[0], n);  
+            matvec_mult(&iMinus_A[fi * n * n], &U[cii * n], F_minus.data(), n);  
 
             for (int k = 0; k < n; ++k) 
                 iFlux[fi * n + k] = F_plus[k] + F_minus[k]; 
@@ -1069,9 +1146,7 @@ void Solver2D::compute_jfluxes() {
 
     int cj, cjj, fj; 
     double weight, pj, pjj, dp, nx, ny, rho, u, v, p, ho, uprime, a, lp, lm, l, lt, lc;  
-    double g = 5.72; 
-
-    static Vector Vj(n, 0.0), Vjj(n, 0.0), Vp(n, 0.0), Vm(n, 0.0), F_plus(n, 0.0), F_minus(n, 0.0);  
+    double g = 5.72, pe = perfgam - 1; 
 
     for (int i = 0; i < Nx_local; ++i) {
         for (int j = 0; j < Ny + 1; ++j) { 
@@ -1099,12 +1174,12 @@ void Solver2D::compute_jfluxes() {
 
             // Positive flux calculation
 
-            rho = Vj[0];
-            u = Vj[1];
-            v = Vj[2];
-            p = Vj[3]; 
-            a = sqrt(perfgam * rho / p);  
-            ho = compute_total_enthalpy(&U[cj * n], n_vel); 
+            rho = Vp[0];
+            u = Vp[1];
+            v = Vp[2];
+            p = Vp[3]; 
+            a = sqrt(perfgam * p / rho);  
+            ho = compute_total_enthalpy(Vp.data(), n_vel); 
 
             uprime = u * nx + v * ny; 
 
@@ -1117,8 +1192,8 @@ void Solver2D::compute_jfluxes() {
             fill(int1.begin(), int1.end(), 0.0);
             for (int k = 0; k < n; ++k) int1[k * n + k] = l;
 
-            V1 = {lc/(a * a), (u * lc + a * nx * lt)/(a * a), (v * lc + a * ny + lt)/(a * a), (ho * lc + a * uprime * lt) / (a * a)};
-            Q = {0.5 * u * u * (perfgam - 1), -u * (perfgam - 1), -v * (perfgam - 1), perfgam - 1};
+            V1 = {lc / (a * a), (u * lc + a * nx * lt)/(a * a), (v * lc + a * ny * lt)/(a * a), (ho * lc + a * uprime * lt) / (a * a)};
+            Q = {0.5 * (u * u + v * v) * (perfgam - 1), -u * pe, -v * pe, pe};
 
             V2 = {lt / a, u * lt / a + nx * lc, v * lt / a + ny * lc, ho * lt / a + uprime * lc};
             W = {-uprime, nx, ny, 0}; 
@@ -1133,12 +1208,12 @@ void Solver2D::compute_jfluxes() {
 
              // Negative flux calculation
 
-            rho = Vjj[0];
-            u = Vjj[1];
-            v = Vjj[2];
-            p = Vjj[3]; 
-            a = sqrt(perfgam * rho/p);  
-            ho = compute_total_enthalpy(&U[cjj * n], n_vel);
+            rho = Vm[0];
+            u = Vm[1];
+            v = Vm[2];
+            p = Vm[3]; 
+            a = sqrt(perfgam * p / rho);  
+            ho = compute_total_enthalpy(Vm.data(), n_vel);
 
             uprime = u * nx + v * ny; 
 
@@ -1151,8 +1226,8 @@ void Solver2D::compute_jfluxes() {
             fill(int1.begin(), int1.end(), 0.0);
             for (int k = 0; k < n; ++k) int1[k * n + k] = l;
 
-            V1 = {lc/(a * a), (u * lc + a * nx * lt)/(a * a), (v * lc + a * ny + lt)/(a * a), (ho * lc + a * uprime * lt) / (a * a)};
-            Q = {0.5 * u * u * (perfgam - 1), -u * (perfgam - 1), -v * (perfgam - 1), perfgam - 1};
+            V1 = {lc / (a * a), (u * lc + a * nx * lt)/(a * a), (v * lc + a * ny * lt)/(a * a), (ho * lc + a * uprime * lt) / (a * a)};
+            Q = {0.5 * (u * u + v * v) * (perfgam - 1), -u * pe, -v * pe, pe};
 
             V2 = {lt / a, u * lt / a + nx * lc, v * lt / a + ny * lc, ho * lt / a + uprime * lc};
             W = {-uprime, nx, ny, 0}; 
@@ -1167,9 +1242,10 @@ void Solver2D::compute_jfluxes() {
 
             for (int k = 0; k < n; ++k) 
                 jFlux[fj * n + k] = F_plus[k] + F_minus[k];  
-
         }
     }
+
+
 }
 
 void Solver2D::relax_left_line() {
@@ -1194,20 +1270,20 @@ void Solver2D::relax_left_line() {
 
             C[k] = -jPlus_A[BF * n * n + k] * jArea[BF];
         }
-        cout << "A and C created" << endl;
+
         for (int k = 0; k < n; ++k) 
             F[k] = iFlux[LF * n + k] * iArea[LF]
                 - iFlux[RF * n + k] * iArea[RF]
                 + jFlux[BF * n + k] * jArea[BF]
                 - jFlux[TF * n + k] * jArea[TF]
-                - iMinus_A[RF * n * n + k] * iArea[RF] * dU_old[((i + 1) * Ny + j) * n + k];
+                - iMinus_A[RF * n * n + k] * iArea[RF] * dU_old[((i + 2) * (Ny + 2) + j + 1) * n + k];
         
         alpha = A;
-        cout << "F and alpha is created" << endl; 
+
         matrix_divide(alpha.data(), F.data(), &v[j * n], n, 1);  //n = rows of x, m = columns of x
-        cout << "First division worked" << endl;
+
         matrix_divide(alpha.data(), C.data(), &g[j * n * n], n, n); 
-        cout << "Top cell computed" << endl;
+
         // ======================= Inner cells ======================== //
         for (int j = Ny - 2; j > 0; --j) {
 
@@ -1233,7 +1309,7 @@ void Solver2D::relax_left_line() {
                     - iFlux[RF * n + k] * iArea[RF]
                     + jFlux[BF * n + k] * jArea[BF]
                     - jFlux[TF * n + k] * jArea[TF]
-                    - iMinus_A[RF * n * n + k] * iArea[RF] * dU_old[((i + 1) * Ny + j) * n + k];
+                    - iMinus_A[RF * n * n + k] * iArea[RF] * dU_old[((i + 2) * (Ny + 2) + j + 1) * n + k];
 
             // Form alpha
             matmat_mult(B.data(), &g[(j + 1) * n * n], result_matrix.data(), n);
@@ -1249,7 +1325,7 @@ void Solver2D::relax_left_line() {
             result_vector2[k] = F[k] - result_vector1[k];        
             matrix_divide(alpha.data(), result_vector2.data(), &v[j * n], n, 1);
         }
-        cout << "Middle cells computed" << endl; 
+ 
         // ==================== Bottom cell ===================== //
         j = 0;
 
@@ -1275,7 +1351,7 @@ void Solver2D::relax_left_line() {
                 - iFlux[RF * n + k] * iArea[RF]
                 + jFlux[BF * n + k] * jArea[BF]
                 - jFlux[TF * n + k] * jArea[TF]
-                - iMinus_A[RF * n * n + k] * iArea[RF] * dU_old[((i + 1) * Ny + j) * n + k];
+                - iMinus_A[RF * n * n + k] * iArea[RF] * dU_old[((i + 2) * (Ny + 2) + j + 1) * n + k];
         
         // Form alpha
         matmat_mult(B.data(), &g[(j + 1) * n * n], result_matrix.data(), n);
@@ -1288,21 +1364,18 @@ void Solver2D::relax_left_line() {
             result_vector2[k] = F[k] - result_vector1[k];
         matrix_divide(alpha.data(), result_vector2.data(), &v[j * n], n, 1); 
 
-        cout << "Bottom cell computed" << endl; 
-
         // ====================== Solve for dU_new ====================== //
         for (int k = 0; k < n; ++k)
-            dU_new[CC * n + k] = v[CC * n + k];
+            dU_new[((i + 1) * (Ny + 2) + 1) * n + k] = v[CC * n + k];
 
         for (int j = 1; j < Ny; ++j) {
             for (int k = 0; k < n; ++k) {
                 CC = i * Ny + j;
-                matvec_mult(&g[CC * n * n], &dU_new[(CC - 1) * n], result_vector1.data(), n);
-                dU_new[CC * n + k] = v[CC * n + k] - result_vector1[k];
+                matvec_mult(&g[CC * n * n], &dU_new[((i + 1) * (Ny + 2) + j)], result_vector1.data(), n);
+                dU_new[((i + 1) * (Ny + 2) * j + 1) * n + k] = v[CC * n + k] - result_vector1[k];
             }
         }
 
-        cout << "dU_new updated" << endl;
     }
 
 }
@@ -1316,7 +1389,7 @@ void Solver2D::relax_inner_lines() {
 
     Vector I = identity(n);  
 
-    for (int i = 1; i < Nx_local - 1; ++i) {
+    for (int i = 0; i < Nx_local; ++i) {
 
         // ====================== Top cell ====================== // 
         int j = Ny - 1;
@@ -1340,8 +1413,8 @@ void Solver2D::relax_inner_lines() {
                 - iFlux[RF * n + k] * iArea[RF]
                 + jFlux[BF * n + k] * jArea[BF]
                 - jFlux[TF * n + k] * jArea[TF]
-                + iPlus_A[LF * n * n + k] * iArea[LF] * dU_old[((i - 1) * Ny + j) * n + k] 
-                - iMinus_A[RF * n * n + k] * iArea[RF] * dU_old[((i + 1) * Ny + j) * n + k];
+                + iPlus_A[LF * n * n + k] * iArea[LF] * dU_old[(i * (Ny + 2) + j + 1) * n + k] 
+                - iMinus_A[RF * n * n + k] * iArea[RF] * dU_old[((i + 2) * (Ny + 2) + j + 1) * n + k];
         
         alpha = A;
         matrix_divide(alpha.data(), F.data(), &v[j * n * n], n, 1);  //n = rows of x, m = columns of x
@@ -1372,8 +1445,8 @@ void Solver2D::relax_inner_lines() {
                     - iFlux[RF * n + k] * iArea[RF]
                     + jFlux[BF * n + k] * jArea[BF]
                     - jFlux[TF * n + k] * jArea[TF]
-                    + iPlus_A[LF * n * n + k] * iArea[LF] * dU_old[((i - 1) * Ny + j) * n + k]
-                    - iMinus_A[RF * n * n + k] * iArea[RF] * dU_old[((i + 1) * Ny + j) * n + k];
+                    + iPlus_A[LF * n * n + k] * iArea[LF] * dU_old[(i * (Ny + 2) + j + 1) * n + k] 
+                    - iMinus_A[RF * n * n + k] * iArea[RF] * dU_old[((i + 2) * (Ny + 2) + j + 1) * n + k];
 
             // Form alpha
             matmat_mult(B.data(), &g[(j + 1) * n * n], result_matrix.data(), n);
@@ -1415,8 +1488,8 @@ void Solver2D::relax_inner_lines() {
                 - iFlux[RF * n + k] * iArea[RF]
                 + jFlux[BF * n + k] * jArea[BF]
                 - jFlux[TF * n + k] * jArea[TF]
-                + iPlus_A[LF * n * n + k] * iArea[LF] * dU_old[((i - 1) * Ny + j) * n + k]
-                - iMinus_A[RF * n * n + k] * iArea[RF] * dU_old[((i + 1) * Ny + j) * n + k];
+                + iPlus_A[LF * n * n + k] * iArea[LF] * dU_old[(i * (Ny + 2) + j + 1) * n + k] 
+                - iMinus_A[RF * n * n + k] * iArea[RF] * dU_old[((i + 2) * (Ny + 2) + j + 1) * n + k];
         
         // Form alpha
         matmat_mult(B.data(), &g[(j + 1) * n * n], result_matrix.data(), n);
@@ -1431,71 +1504,34 @@ void Solver2D::relax_inner_lines() {
 
         // ====================== Solve for dU_new ====================== //
         for (int k = 0; k < n; ++k)
-            dU_new[CC * n + k] = v[CC * n + k];
+            dU_new[((i + 1) * (Ny + 2) + j + 1) * n + k] = v[CC * n + k];
 
         for (int j = 1; j < Ny; ++j) {
             for (int k = 0; k < n; ++k) {
                 CC = i * Ny + j;
-                matvec_mult(&g[CC * n * n], &dU_new[(CC - 1) * n], result_vector1.data(), n);
-                dU_new[CC * n + k] = v[CC * n + k] - result_vector1[k];
+                matvec_mult(&g[CC * n * n], &dU_new[((i + 1) * (Ny + 2) + j) * n], result_vector1.data(), n);
+                dU_new[((i + 1) * (Ny + 2) + j + 1) * n + k] = v[CC * n + k] - result_vector1[k];
             }
         }
     }
 }
 void Solver2D::relax_right_line() {
 
-    Vector A(n * n, 0.0), B(n * n, 0.0), C(n * n, 0.0), F(n, 0.0); 
-    Vector alpha(n * n, 0.0), v(Ny * n, 0.0), g( Ny * n * n, 0.0); 
+    if (rank == size - 1) {
 
-    // Intermediate vectors and matrices;
-    Vector result_matrix(n * n, 0.0), result_vector1(n, 0.0), result_vector2(n, 0.0); 
+        // ====================== Top cell ====================== // 
+        int i = Nx_local - 1, j = Ny - 1;
+        int LF = (i * Ny + j), RF = ((i + 1) * Ny + j), 
+            BF = (i * (Ny + 1) + j), TF = (i * (Ny + 1) + j + 1),
+            CC = i * Ny + j;
 
-    Vector I = identity(n);  
-
-    // ====================== Top cell ====================== // 
-    int i = Nx_local - 1, j = Ny - 1;
-    int LF = (i * Ny + j), RF = ((i + 1) * Ny + j), 
-        BF = (i * (Ny + 1) + j), TF = (i * (Ny + 1) + j + 1),
-        CC = i * Ny + j;
-
-    for (int k = 0; k < n * n; ++k) {
-        A[k] = 
-        Volume[CC] / dt * I[k]          // Time-derivative part
-        - iMinus_A[LF * n * n + k] * iArea[LF] // Left-face contribution
-        + (iPlus_A[RF * n * n + k] + iER[j * n * n + k] * iMinus_A[RF * n * n + k]) * iArea[RF]   // Right-face contribution
-        - jMinus_A[BF * n * n + k] * jArea[BF]  // Bottom-face contribution
-        + (jPlus_A[TF * n * n + k] + jET[i * n * n + k] * jMinus_A[TF * n * n + k]) * jArea[TF]; // Top-face contribution
-
-        C[k] = -jPlus_A[BF * n * n + k] * jArea[BF];
-    }
-
-    for (int k = 0; k < n; ++k) 
-        F[k] = iFlux[LF * n + k] * iArea[LF]
-            - iFlux[RF * n + k] * iArea[RF]
-            + jFlux[BF * n + k] * jArea[BF]
-            - jFlux[TF * n + k] * jArea[TF]
-            + iPlus_A[LF * n * n + k] * iArea[LF] * dU_old[((i - 1) * Ny + j) * n + k];
-    
-    alpha = A;
-    matrix_divide(alpha.data(), F.data(), &v[j * n * n], n, 1);  //n = rows of x, m = columns of x
-    matrix_divide(alpha.data(), C.data(), &g[j * n], n, n); 
-
-    // ======================= Inner cells ======================== //
-    for (int j = Ny - 2; j > 0; --j) {
-
-        LF = (i * Ny + j), RF = ((i + 1) * Ny + j), 
-        BF = (i * (Ny + 1) + j), TF = (i * (Ny + 1) + j + 1),
-        CC = i * Ny + j;
-
-        for (int k =  0; k < n * n; ++k) {
-            B[k] = jMinus_A[TF * n * n + k] * jArea[TF]; 
-
+        for (int k = 0; k < n * n; ++k) {
             A[k] = 
-                Volume[CC] / dt * I[k]          // Time-derivative part
-                - iMinus_A[LF * n * n + k] * iArea[LF] // Left-face contribution
-                + (iPlus_A[RF * n * n + k] + iER[j * n * n + k] * iMinus_A[RF * n * n + k]) * iArea[RF]   // Right-face contribution
-                - jMinus_A[BF * n * n + k] * jArea[BF]  // Bottom-face contribution
-                + jPlus_A[TF * n * n + k] * jArea[TF]; // Top-face contribution
+            Volume[CC] / dt * I[k]          // Time-derivative part
+            - iMinus_A[LF * n * n + k] * iArea[LF] // Left-face contribution
+            + (iPlus_A[RF * n * n + k] + iER[j * n * n + k] * iMinus_A[RF * n * n + k]) * iArea[RF]   // Right-face contribution
+            - jMinus_A[BF * n * n + k] * jArea[BF]  // Bottom-face contribution
+            + (jPlus_A[TF * n * n + k] + jET[i * n * n + k] * jMinus_A[TF * n * n + k]) * jArea[TF]; // Top-face contribution
 
             C[k] = -jPlus_A[BF * n * n + k] * jArea[BF];
         }
@@ -1505,71 +1541,104 @@ void Solver2D::relax_right_line() {
                 - iFlux[RF * n + k] * iArea[RF]
                 + jFlux[BF * n + k] * jArea[BF]
                 - jFlux[TF * n + k] * jArea[TF]
-                + iPlus_A[LF * n * n + k] * iArea[LF] * dU_old[((i - 1) * Ny + j) * n + k];
+                + iPlus_A[LF * n * n + k] * iArea[LF] * dU_old[(i * Ny + j) * n + k];
+        
+        alpha = A;
+        matrix_divide(alpha.data(), F.data(), &v[j * n * n], n, 1);  //n = rows of x, m = columns of x
+        matrix_divide(alpha.data(), C.data(), &g[j * n], n, n); 
 
+        // ======================= Inner cells ======================== //
+        for (int j = Ny - 2; j > 0; --j) {
+
+            LF = (i * Ny + j), RF = ((i + 1) * Ny + j), 
+            BF = (i * (Ny + 1) + j), TF = (i * (Ny + 1) + j + 1),
+            CC = i * Ny + j;
+
+            for (int k =  0; k < n * n; ++k) {
+                B[k] = jMinus_A[TF * n * n + k] * jArea[TF]; 
+
+                A[k] = 
+                    Volume[CC] / dt * I[k]          // Time-derivative part
+                    - iMinus_A[LF * n * n + k] * iArea[LF] // Left-face contribution
+                    + (iPlus_A[RF * n * n + k] + iER[j * n * n + k] * iMinus_A[RF * n * n + k]) * iArea[RF]   // Right-face contribution
+                    - jMinus_A[BF * n * n + k] * jArea[BF]  // Bottom-face contribution
+                    + jPlus_A[TF * n * n + k] * jArea[TF]; // Top-face contribution
+
+                C[k] = -jPlus_A[BF * n * n + k] * jArea[BF];
+            }
+
+            for (int k = 0; k < n; ++k) 
+                F[k] = iFlux[LF * n + k] * iArea[LF]
+                    - iFlux[RF * n + k] * iArea[RF]
+                    + jFlux[BF * n + k] * jArea[BF]
+                    - jFlux[TF * n + k] * jArea[TF]
+                    + iPlus_A[LF * n * n + k] * iArea[LF] * dU_old[(i * Ny + j) * n + k];
+
+            // Form alpha
+            matmat_mult(B.data(), &g[(j + 1) * n * n], result_matrix.data(), n);
+            for (int k = 0; k < n * n; ++k) 
+                alpha[k] = A[k] - result_matrix[k];
+        
+            // Form g
+            matrix_divide(alpha.data(), C.data(), &g[j * n * n], n, n); 
+
+            // Form v
+            matvec_mult(B.data(), &v[(j + 1) * n], result_vector1.data(), n); 
+            for (int k = 0; k < n; ++k) 
+            result_vector2[k] = F[k] - result_vector1[k];        
+            matrix_divide(alpha.data(), result_vector2.data(), &v[j * n], n, 1);
+        }
+
+        // ==================== Bottom cell ===================== //
+        j = 0;
+
+        LF = (i * Ny + j), RF = ((i + 1) * Ny + j), 
+        BF = (i * (Ny + 1) + j), TF = (i * (Ny + 1) + j + 1),
+        CC = i * Ny + j;
+
+
+        for (int k = 0; k < n * n; ++k) {
+
+            B[k] = jMinus_A[TF * n * n + k] * jArea[TF]; 
+
+            A[k] = 
+            Volume[CC] / dt * I[k]          // Time-derivative part
+            - iMinus_A[LF * n * n + k] * iArea[LF] // Left-face contribution
+            + (iPlus_A[RF * n * n + k] + iER[j * n * n + k] * iMinus_A[RF * n * n + k]) * iArea[RF]   // Right-face contribution
+            - (jMinus_A[BF * n * n + k] + jEB[i * n * n + k] * jPlus_A[TF * n * n + k]) * jArea[BF]  // Bottom-face contribution
+            + jPlus_A[TF * n * n + k] * jArea[TF]; // Top-face contribution
+        }
+
+        for (int k = 0; k < n; ++k) 
+            F[k] = iFlux[LF * n + k] * iArea[LF]
+                - iFlux[RF * n + k] * iArea[RF]
+                + jFlux[BF * n + k] * jArea[BF]
+                - jFlux[TF * n + k] * jArea[TF]
+                + iPlus_A[LF * n * n + k] * iArea[LF] * dU_old[(i * Ny + j) * n + k];
+        
         // Form alpha
         matmat_mult(B.data(), &g[(j + 1) * n * n], result_matrix.data(), n);
         for (int k = 0; k < n * n; ++k) 
             alpha[k] = A[k] - result_matrix[k];
-    
-        // Form g
-        matrix_divide(alpha.data(), C.data(), &g[j * n * n], n, n); 
 
         // Form v
-        matvec_mult(B.data(), &v[(j + 1) * n], result_vector1.data(), n); 
+        matvec_mult(B.data(), &v[(j + 1) * n], result_vector1.data(), n);
         for (int k = 0; k < n; ++k) 
-        result_vector2[k] = F[k] - result_vector1[k];        
-        matrix_divide(alpha.data(), result_vector2.data(), &v[j * n], n, 1);
-    }
+            result_vector2[k] = F[k] - result_vector1[k];
+        matrix_divide(alpha.data(), result_vector2.data(), &v[j * n], n, 1); 
 
-    // ==================== Bottom cell ===================== //
-    j = 0;
+        // ====================== Solve for dU_new ====================== //
+        for (int k = 0; k < n; ++k)
+            dU_new[((i + 1) * (Ny + 2) + 1)] = v[CC * n + k];
 
-    LF = (i * Ny + j), RF = ((i + 1) * Ny + j), 
-    BF = (i * (Ny + 1) + j), TF = (i * (Ny + 1) + j + 1),
-    CC = i * Ny + j;
-
-
-    for (int k = 0; k < n * n; ++k) {
-
-        B[k] = jMinus_A[TF * n * n + k] * jArea[TF]; 
-
-        A[k] = 
-        Volume[CC] / dt * I[k]          // Time-derivative part
-        - iMinus_A[LF * n * n + k] * iArea[LF] // Left-face contribution
-        + (iPlus_A[RF * n * n + k] + iER[j * n * n + k] * iMinus_A[RF * n * n + k]) * iArea[RF]   // Right-face contribution
-        - (jMinus_A[BF * n * n + k] + jEB[i * n * n + k] * jPlus_A[TF * n * n + k]) * jArea[BF]  // Bottom-face contribution
-        + jPlus_A[TF * n * n + k] * jArea[TF]; // Top-face contribution
-    }
-
-    for (int k = 0; k < n; ++k) 
-        F[k] = iFlux[LF * n + k] * iArea[LF]
-            - iFlux[RF * n + k] * iArea[RF]
-            + jFlux[BF * n + k] * jArea[BF]
-            - jFlux[TF * n + k] * jArea[TF]
-            + iPlus_A[LF * n * n + k] * iArea[LF] * dU_old[((i - 1) * Ny + j) * n + k];
-    
-    // Form alpha
-    matmat_mult(B.data(), &g[(j + 1) * n * n], result_matrix.data(), n);
-    for (int k = 0; k < n * n; ++k) 
-        alpha[k] = A[k] - result_matrix[k];
-
-    // Form v
-    matvec_mult(B.data(), &v[(j + 1) * n], result_vector1.data(), n);
-    for (int k = 0; k < n; ++k) 
-        result_vector2[k] = F[k] - result_vector1[k];
-    matrix_divide(alpha.data(), result_vector2.data(), &v[j * n], n, 1); 
-
-    // ====================== Solve for dU_new ====================== //
-    for (int k = 0; k < n; ++k)
-        dU_new[CC * n + k] = v[CC * n + k];
-
-    for (int j = 1; j < Ny; ++j) {
-        for (int k = 0; k < n; ++k) {
-            CC = i * Ny + j;
-            matvec_mult(&g[CC * n * n], &dU_new[(CC - 1) * n], result_vector1.data(), n);
-            dU_new[CC * n + k] = v[CC * n + k] - result_vector1[k];
+        for (int j = 1; j < Ny; ++j) {
+            for (int k = 0; k < n; ++k) {
+                CC = i * Ny + j;
+                matvec_mult(&g[CC * n * n], &dU_new[((i + 1) * (Ny + 2) + j) * n], result_vector1.data(), n);
+                dU_new[((i + 1) * (Ny + 2) + j + 1) * n + k] = v[CC * n + k] - result_vector1[k]; 
+            }
         }
+
     }
 }
 
@@ -1578,7 +1647,8 @@ void Solver2D::update_U() {
     for (int i = 0; i < Nx_local; ++i) {
         for (int j = 0; j < Ny; ++j) {
             for (int k = 0; k < n; ++k) {
-                U[((i + 1) * (Ny + 2) + j + 1) * n + k] += dU_new[(i * Ny + j) * n + k];
+                U[((i + 1) * (Ny + 2) + j + 1) * n + k] 
+                    += dU_new[((i + 1) * (Ny + 2) + j + 1) * n + k]; 
             }
         }
     }
@@ -1588,7 +1658,6 @@ void Solver2D::update_U() {
 void Solver2D::compute_dt() {
     Vector V(4); 
     double c, max_new = 0.0, max_old = 0.0, sidesum, l, r, b, t;
-
     for (int i = 0; i < Nx_local; ++i) {
         for (int j = 0; j < Ny; ++j) {
             constoprim(&U[((i + 1) * (Ny + 2) + j + 1) * n], V.data(), n_vel);
@@ -1618,9 +1687,10 @@ void Solver2D::compute_dt() {
 }
 void Solver2D::compute_inner_res() {
 
-    Vector A(n, 0.0), B(n, 0.0), C(n, 0.0), I = {1, 0, 0, 0};
+    Vector X(n, 0.0), Y(n, 0.0), Z(n, 0.0), ID = {1, 0, 0, 0}; 
 
     inner_res = 0.0; 
+    double inner_res_local = 0.0;
     double F, res = 0.0;
 
     for (int i = 1; i < Nx_local; ++i) {
@@ -1631,32 +1701,35 @@ void Solver2D::compute_inner_res() {
             CC = i * Ny + j;
 
             for (int k =  0; k < n ; ++k) {
-                B[k] = jMinus_A[TF * n * n + k] * jArea[TF]; 
+                Y[k] = jMinus_A[TF * n * n + k] * jArea[TF]; 
 
-                A[k] = 
+                X[k] = 
                     Volume[CC] / dt * I[k]          // Time-derivative part
                     - iMinus_A[LF * n * n + k] * iArea[LF] // Left-face contribution
                     + iPlus_A[RF * n * n + k] * iArea[RF]   // Right-face contribution
                     - jMinus_A[BF * n * n + k] * jArea[BF]  // Bottom-face contribution
                     + jPlus_A[TF * n * n + k] * jArea[TF]; // Top-face contribution
 
-                C[k] = -jPlus_A[BF * n * n + k] * jArea[BF];
+                Z[k] = -jPlus_A[BF * n * n + k] * jArea[BF];
             }
 
             
-                F = iFlux[LF * n] * iArea[LF]
-                    - iFlux[RF * n] * iArea[RF]
-                    + jFlux[BF * n] * jArea[BF]
-                    - jFlux[TF * n] * jArea[TF]
-                    + iPlus_A[LF * n * n] * iArea[LF] * dU_old[((i - 1) * Ny + j) * n]
-                    - iMinus_A[RF * n * n] * iArea[RF] * dU_old[((i + 1) * Ny + j) * n];
+            F = iFlux[LF * n] * iArea[LF]
+                - iFlux[RF * n] * iArea[RF]
+                + jFlux[BF * n] * jArea[BF]
+                - jFlux[TF * n] * jArea[TF]
+                + iPlus_A[LF * n * n] * iArea[LF] * dU_old[(i * (Ny + 2) + j + 1) * n] 
+                - iMinus_A[RF * n * n] * iArea[RF] * dU_old[((i + 2) * (Ny + 2) + j + 1) * n];
 
-            res = dot_product(B.data(), &dU_new[(i * Ny + j + 1) * n], n) + dot_product(A.data(), &dU_new[(i * Ny + j) * n], n) 
-                    + dot_product(C.data(), &dU_new[(i * Ny + j - 1) * n], n) - F; 
+            res = dot_product(Y.data(), &dU_new[( (i + 1) * (Ny + 2) + j + 1) * n], n)
+                    + dot_product(X.data(), &dU_new[((i + 1) * (Ny + 2) + j) * n], n) 
+                    + dot_product(Z.data(), &dU_new[((i + 1) * (Ny + 2) + j - 1) * n], n) - F; 
 
-            inner_res += res * res;
+            inner_res_local += res * res;
         }
     }
+
+    MPI_Allreduce(&inner_res_local, &inner_res, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
 
     inner_res = sqrt(inner_res); 
 

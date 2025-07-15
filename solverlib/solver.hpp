@@ -44,21 +44,24 @@ void constoprim(const double* U, double* V, const int dimensions);
 
 inline double computeInternalEnergy(const double* U, int n_vel) {
     double udotu = 0.0;
-    for (int i = 0; i < n_vel; ++i) {
+    for (int i = 0; i < n_vel; ++i) 
         udotu += U[i + 1] * U[i + 1]; 
-    }
 
     return U[n_vel + 1] / U[0] - 0.5 / (U[0] * U[0]) * udotu;   
 }
 inline double computePressure(const double* U, int n_vel) {
     double udotu = 0.0;
-    for (int i = 0; i < n_vel; ++i) {
+    for (int i = 0; i < n_vel; ++i) 
         udotu += U[i + 1] * U[i + 1]; 
-    }
+    
     return (U[n_vel + 1] - 0.5 / (U[0] * U[0]) * udotu) * (perfgam - 1);
 }
-inline double compute_total_enthalpy(const double* U, int n_vel) {
-    return (U[n_vel + 1] + computePressure(&U[0], n_vel)) / U[0]; 
+inline double compute_total_enthalpy(const double* V, int n_vel) {
+    double udotu;
+    for (int i = 0; i < n_vel; ++i) 
+        udotu += V[i + 1] * V[i + 1];
+    
+    return (V[3] / (perfgam - 1) + 0.5 * V[0] * udotu + V[3]) / V[0];
 }
 
 
@@ -107,6 +110,9 @@ private:
         jPlus_A, jMinus_A, irho_A, jrho_A, V, V1, V2, Q, W, int1, int2, int3, UL, UR;
     Vector local_Nx;
     
+    // Flux calculation data structures
+    Vector Vi, Vii, Vj, Vjj, Vp, Vm, F_plus, F_minus;
+
     // Grid data structures
     Vector xCenter, yCenter, Volume, iFxNorm, iFyNorm, jFxNorm, jFyNorm, iArea, jArea;
     
