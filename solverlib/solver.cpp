@@ -431,11 +431,11 @@ void Solver2D::form_inviscid_boundary_U() {
         }
     }
 
-    for (int i = 0; i < Nx_local + 2; ++i) {
+    for (int i = 0; i < Nx_local; ++i) {
 
         // Bottom ghost cell (j = 0), reference interior cell at j = 1
-        int bottom_interior_idx = (i * (Ny + 2) + 1) * n;
-        int bottom_ghost_idx    = (i * (Ny + 2) + 0) * n;
+        int bottom_interior_idx = ((i + 1) * (Ny + 2) + 1) * n;
+        int bottom_ghost_idx    = ((i + 1) * (Ny + 2) + 0) * n;
 
         Uholder = get_U_values(BCs.bottom, &U[bottom_interior_idx], 
                             jFxNorm[i * (Ny + 1) + 0], jFyNorm[i * (Ny + 1) + 0]);
@@ -444,8 +444,8 @@ void Solver2D::form_inviscid_boundary_U() {
             U[bottom_ghost_idx + k] = Uholder[k]; 
 
         // Top ghost cell (j = Ny + 1), reference interior cell at j = Ny
-        int top_interior_idx = (i * (Ny + 2) + Ny) * n;
-        int top_ghost_idx    = (i * (Ny + 2) + (Ny + 1)) * n;
+        int top_interior_idx = ((i + 1) * (Ny + 2) + Ny) * n;
+        int top_ghost_idx    = ((i + 1) * (Ny + 2) + (Ny + 1)) * n;
 
         Uholder = get_U_values(BCs.top, &U[top_interior_idx], 
                             jFxNorm[i * (Ny + 1) + Ny], jFyNorm[i * (Ny + 1) + Ny]);
@@ -466,7 +466,9 @@ Vector Solver2D::get_U_values(BCType type, double* U_inner, double x_norm, doubl
         return U_inlet; 
 
     case BCType::Outlet:
-        for (int k = 0; k < n; ++k) U[k] = U_inner[k]; 
+        for (int k = 0; k < n; ++k) 
+            ghost[k] = U_inner[k];
+        return ghost; 
 
     case BCType::IsothermalWall:
 
@@ -551,7 +553,7 @@ Vector Solver2D::get_E_values(BCType type, double x_norm, double y_norm) {
 
     Vector holder =     {1, 0, 0, 0,
                         0, 1 - 2 * x_norm * x_norm, -2 * x_norm * y_norm, 0,
-                        0, 2 - x_norm * y_norm, 1 - 2 * y_norm * y_norm, 0,
+                        0, -2 * x_norm * y_norm, 1 - 2 * y_norm * y_norm, 0,
                         0, 0, 0, 1};
 
     switch (type) {
@@ -561,7 +563,7 @@ Vector Solver2D::get_E_values(BCType type, double x_norm, double y_norm) {
         return holder; 
     
     case BCType::Outlet:
-        return identity(n); 
+        return I; 
 
     case BCType::IsothermalWall:
         return holder;
@@ -683,15 +685,21 @@ void Solver2D::solve() {
     while (counter < 1) {
 
         if (rank == 0) cout << "-> Iteration: " << counter << endl << endl; 
+
+
         exchange_ghost_cells();
         if (rank == 0) cout << "-> Ghost cells exchanged and set. \n\n";
         MPI_Barrier(MPI_COMM_WORLD);
+
+
         compute_dt();
         if (rank == 0) cout << "-> dt computed. \n\n";
         MPI_Barrier(MPI_COMM_WORLD);
+
+         
         int in_counter = 0;
 
-        while (in_counter < 1) {
+        while (in_counter < 2) {
 
             compute_ifluxes();
             if (rank == 0) cout << "-> i-Fluxes computed. \n\n";
@@ -744,21 +752,30 @@ void Solver2D::solve() {
             if (rank == 0) cout << "-> middle lines relaxed. \n\n";
             MPI_Barrier(MPI_COMM_WORLD);
 
-            relax_right_line(); 
-                cout << "-> right line relaxed. \n\n";
-            MPI_Barrier(MPI_COMM_WORLD);
-
-            swap(dU_new, dU_old);
+            cout << "dU_new inner lines: " << endl;
             for (int i = 0; i < Nx_local + 2; ++i) {
                 for (int j = 0; j < Ny + 2; ++j) {
-                    cout << i << ", " << j << ": ";
                     for (int k = 0; k < n; ++k) {
-                        cout << dU_old[(i * (Ny + 2) + j) * n + k] << " ";
+                        cout << dU_new[(1 * (Ny + 2) + j) * n + k] << " ";
                     }
-                    cout << endl;
-                
-                }
+                    cout << endl;       
+                }     
             }
+
+            relax_right_line(); 
+            if (rank == 0) cout << "-> right line relaxed. \n\n";
+            MPI_Barrier(MPI_COMM_WORLD);
+
+
+            cout << "dU_new right line: " << endl;
+            for (int j = 0; j < Ny + 2; ++j) {
+                for (int k = 0; k < n; ++k) {
+                    cout << dU_new[(Nx_local * (Ny + 2) + j) * n + k] << " ";
+                }
+                cout << endl;            
+            }
+
+            swap(dU_new, dU_old);
 
             compute_inner_res();
             if (rank == 0) cout << "-> inner residual computed: " << inner_res << "\n\n"; 
@@ -1048,8 +1065,8 @@ void Solver2D::compute_ifluxes() {
         for (int j = 0; j < Ny; ++j) { 
 
             
-            ci = i * (Ny + 2) + j;
-            cii = (i + 1) * (Ny + 2) + j; 
+            ci = i * (Ny + 2) + j + 1;
+            cii = (i + 1) * (Ny + 2) + j + 1; 
             fi = i * Ny + j;
 
             nx = iFxNorm[fi];
@@ -1113,9 +1130,9 @@ void Solver2D::compute_ifluxes() {
 
             uprime = u * nx + v * ny; 
 
-            lp = 0.5 * (uprime + a + fabs(uprime + a));
-            lm = 0.5 * (uprime - a + fabs(uprime - a));
-            l = 0.5 * (uprime + fabs(uprime));
+            lp = 0.5 * (uprime + a - fabs(uprime + a));
+            lm = 0.5 * (uprime - a - fabs(uprime - a));
+            l = 0.5 * (uprime - fabs(uprime));
             lt = 0.5 * (lp - lm);
             lc = 0.5 * (lp + lm - 2 * l);
 
@@ -1152,9 +1169,9 @@ void Solver2D::compute_jfluxes() {
         for (int j = 0; j < Ny + 1; ++j) { 
 
             
-            cj = i * (Ny + 2) + j;
-            cjj = i * (Ny + 2) + j + 1; 
-            fj = i * Ny + j;
+            cj = (i + 1) * (Ny + 2) + j;
+            cjj = (i + 1) * (Ny + 2) + j + 1; 
+            fj = i * (Ny + 1) + j;
 
             nx = jFxNorm[fj];
             ny = jFyNorm[fj];  
@@ -1204,7 +1221,7 @@ void Solver2D::compute_jfluxes() {
             for (int k = 0; k < n * n; ++k) 
                 jPlus_A[fj * n * n + k]  = int1[k] + int2[k] + int3[k];
 
-            matvec_mult(&iPlus_A[fj * n * n], &U[cj * n], &F_plus[0], n);  
+            matvec_mult(&jPlus_A[fj * n * n], &U[cj * n], F_plus.data(), n);  
 
              // Negative flux calculation
 
@@ -1217,9 +1234,9 @@ void Solver2D::compute_jfluxes() {
 
             uprime = u * nx + v * ny; 
 
-            lp = 0.5 * (uprime + a + fabs(uprime + a));
-            lm = 0.5 * (uprime - a + fabs(uprime - a));
-            l = 0.5 * (uprime + fabs(uprime));
+            lp = 0.5 * (uprime + a - fabs(uprime + a));
+            lm = 0.5 * (uprime - a - fabs(uprime - a));
+            l = 0.5 * (uprime - fabs(uprime));
             lt = 0.5 * (lp - lm);
             lc = 0.5 * (lp + lm - 2 * l);
 
@@ -1238,14 +1255,12 @@ void Solver2D::compute_jfluxes() {
             for (int k = 0; k < n * n; ++k) 
                 jMinus_A[fj * n * n + k]  = int1[k] + int2[k] + int3[k]; 
 
-            matvec_mult(&iMinus_A[fj * n * n], &U[cjj * n], &F_minus[0], n);  
+            matvec_mult(&jMinus_A[fj * n * n], &U[cjj * n], F_minus.data(), n);  
 
             for (int k = 0; k < n; ++k) 
                 jFlux[fj * n + k] = F_plus[k] + F_minus[k];  
         }
     }
-
-
 }
 
 void Solver2D::relax_left_line() {
@@ -1322,7 +1337,7 @@ void Solver2D::relax_left_line() {
             // Form v
             matvec_mult(B.data(), &v[(j + 1) * n], result_vector1.data(), n); 
             for (int k = 0; k < n; ++k) 
-            result_vector2[k] = F[k] - result_vector1[k];        
+                result_vector2[k] = F[k] - result_vector1[k];        
             matrix_divide(alpha.data(), result_vector2.data(), &v[j * n], n, 1);
         }
  
@@ -1366,30 +1381,22 @@ void Solver2D::relax_left_line() {
 
         // ====================== Solve for dU_new ====================== //
         for (int k = 0; k < n; ++k)
-            dU_new[((i + 1) * (Ny + 2) + 1) * n + k] = v[CC * n + k];
+            dU_new[((i + 1) * (Ny + 2) + 1) * n + k] = v[0 * n + k];
 
         for (int j = 1; j < Ny; ++j) {
-            for (int k = 0; k < n; ++k) {
-                CC = i * Ny + j;
-                matvec_mult(&g[CC * n * n], &dU_new[((i + 1) * (Ny + 2) + j)], result_vector1.data(), n);
-                dU_new[((i + 1) * (Ny + 2) * j + 1) * n + k] = v[CC * n + k] - result_vector1[k];
-            }
+            matvec_mult(&g[j * n * n], &dU_new[((i + 1) * (Ny + 2) + j)], result_vector1.data(), n);
+            for (int k = 0; k < n; ++k)
+                dU_new[((i + 1) * (Ny + 2) * j + 1) * n + k] = v[j * n + k] - result_vector1[k];
+            
         }
 
     }
 
 }
-void Solver2D::relax_inner_lines() {
+void Solver2D::relax_inner_lines() { 
 
-    Vector A(n * n, 0.0), B(n * n, 0.0), C(n * n, 0.0), F(n, 0.0); 
-    Vector alpha(n * n, 0.0), v(Ny * n, 0.0), g( Ny * n * n, 0.0); 
 
-    // Intermediate vectors and matrices;
-    Vector result_matrix(n * n, 0.0), result_vector1(n, 0.0), result_vector2(n, 0.0); 
-
-    Vector I = identity(n);  
-
-    for (int i = 0; i < Nx_local; ++i) {
+    for (int i = 1; i < Nx_local; ++i) {
 
         // ====================== Top cell ====================== // 
         int j = Ny - 1;
@@ -1417,8 +1424,8 @@ void Solver2D::relax_inner_lines() {
                 - iMinus_A[RF * n * n + k] * iArea[RF] * dU_old[((i + 2) * (Ny + 2) + j + 1) * n + k];
         
         alpha = A;
-        matrix_divide(alpha.data(), F.data(), &v[j * n * n], n, 1);  //n = rows of x, m = columns of x
-        matrix_divide(alpha.data(), C.data(), &g[j * n], n, n); 
+        matrix_divide(alpha.data(), F.data(), &v[j * n], n, 1);  //n = rows of x, m = columns of x
+        matrix_divide(alpha.data(), C.data(), &g[j * n * n], n, n); 
 
         // ======================= Inner cells ======================== //
         for (int j = Ny - 2; j > 0; --j) {
@@ -1459,10 +1466,9 @@ void Solver2D::relax_inner_lines() {
             // Form v
             matvec_mult(B.data(), &v[(j + 1) * n], result_vector1.data(), n); 
             for (int k = 0; k < n; ++k) 
-            result_vector2[k] = F[k] - result_vector1[k];        
+                result_vector2[k] = F[k] - result_vector1[k];        
             matrix_divide(alpha.data(), result_vector2.data(), &v[j * n], n, 1);
         }
-
         // ==================== Bottom cell ===================== //
         j = 0;
 
@@ -1504,18 +1510,18 @@ void Solver2D::relax_inner_lines() {
 
         // ====================== Solve for dU_new ====================== //
         for (int k = 0; k < n; ++k)
-            dU_new[((i + 1) * (Ny + 2) + j + 1) * n + k] = v[CC * n + k];
+            dU_new[((i + 1) * (Ny + 2) + j + 1) * n + k] = v[0 * n + k];
 
         for (int j = 1; j < Ny; ++j) {
-            for (int k = 0; k < n; ++k) {
-                CC = i * Ny + j;
-                matvec_mult(&g[CC * n * n], &dU_new[((i + 1) * (Ny + 2) + j) * n], result_vector1.data(), n);
-                dU_new[((i + 1) * (Ny + 2) + j + 1) * n + k] = v[CC * n + k] - result_vector1[k];
-            }
+            matvec_mult(&g[j * n * n], &dU_new[((i + 1) * (Ny + 2) + j) * n], result_vector1.data(), n);
+            for (int k = 0; k < n; ++k) 
+                dU_new[((i + 1) * (Ny + 2) + j + 1) * n + k] = v[j * n + k] - result_vector1[k];
         }
     }
+
 }
 void Solver2D::relax_right_line() {
+
 
     if (rank == size - 1) {
 
@@ -1544,8 +1550,9 @@ void Solver2D::relax_right_line() {
                 + iPlus_A[LF * n * n + k] * iArea[LF] * dU_old[(i * Ny + j) * n + k];
         
         alpha = A;
-        matrix_divide(alpha.data(), F.data(), &v[j * n * n], n, 1);  //n = rows of x, m = columns of x
-        matrix_divide(alpha.data(), C.data(), &g[j * n], n, n); 
+        matrix_divide(alpha.data(), F.data(), &v[j * n], n, 1);  //n = rows of x, m = columns of x
+        matrix_divide(alpha.data(), C.data(), &g[j * n * n], n, n); 
+
 
         // ======================= Inner cells ======================== //
         for (int j = Ny - 2; j > 0; --j) {
@@ -1585,7 +1592,7 @@ void Solver2D::relax_right_line() {
             // Form v
             matvec_mult(B.data(), &v[(j + 1) * n], result_vector1.data(), n); 
             for (int k = 0; k < n; ++k) 
-            result_vector2[k] = F[k] - result_vector1[k];        
+                result_vector2[k] = F[k] - result_vector1[k];        
             matrix_divide(alpha.data(), result_vector2.data(), &v[j * n], n, 1);
         }
 
@@ -1627,17 +1634,19 @@ void Solver2D::relax_right_line() {
             result_vector2[k] = F[k] - result_vector1[k];
         matrix_divide(alpha.data(), result_vector2.data(), &v[j * n], n, 1); 
 
+
         // ====================== Solve for dU_new ====================== //
         for (int k = 0; k < n; ++k)
-            dU_new[((i + 1) * (Ny + 2) + 1)] = v[CC * n + k];
+            dU_new[((i + 1) * (Ny + 2) + 1)] = v[0 * n + k];
 
         for (int j = 1; j < Ny; ++j) {
-            for (int k = 0; k < n; ++k) {
-                CC = i * Ny + j;
-                matvec_mult(&g[CC * n * n], &dU_new[((i + 1) * (Ny + 2) + j) * n], result_vector1.data(), n);
-                dU_new[((i + 1) * (Ny + 2) + j + 1) * n + k] = v[CC * n + k] - result_vector1[k]; 
-            }
+            matvec_mult(&g[j * n * n], &dU_new[((i + 1) * (Ny + 2) + j) * n], result_vector1.data(), n);
+            for (int k = 0; k < n; ++k) 
+                dU_new[((i + 1) * (Ny + 2) + j + 1) * n + k] = v[j * n + k] - result_vector1[k]; 
+            
         }
+
+        cout << "dUs computed" << endl;
 
     }
 }
@@ -1658,6 +1667,7 @@ void Solver2D::update_U() {
 void Solver2D::compute_dt() {
     Vector V(4); 
     double c, max_new = 0.0, max_old = 0.0, sidesum, l, r, b, t;
+
     for (int i = 0; i < Nx_local; ++i) {
         for (int j = 0; j < Ny; ++j) {
             constoprim(&U[((i + 1) * (Ny + 2) + j + 1) * n], V.data(), n_vel);
@@ -1704,7 +1714,7 @@ void Solver2D::compute_inner_res() {
                 Y[k] = jMinus_A[TF * n * n + k] * jArea[TF]; 
 
                 X[k] = 
-                    Volume[CC] / dt * I[k]          // Time-derivative part
+                    Volume[CC] / dt * ID[k]          // Time-derivative part
                     - iMinus_A[LF * n * n + k] * iArea[LF] // Left-face contribution
                     + iPlus_A[RF * n * n + k] * iArea[RF]   // Right-face contribution
                     - jMinus_A[BF * n * n + k] * jArea[BF]  // Bottom-face contribution
@@ -1721,9 +1731,9 @@ void Solver2D::compute_inner_res() {
                 + iPlus_A[LF * n * n] * iArea[LF] * dU_old[(i * (Ny + 2) + j + 1) * n] 
                 - iMinus_A[RF * n * n] * iArea[RF] * dU_old[((i + 2) * (Ny + 2) + j + 1) * n];
 
-            res = dot_product(Y.data(), &dU_new[( (i + 1) * (Ny + 2) + j + 1) * n], n)
-                    + dot_product(X.data(), &dU_new[((i + 1) * (Ny + 2) + j) * n], n) 
-                    + dot_product(Z.data(), &dU_new[((i + 1) * (Ny + 2) + j - 1) * n], n) - F; 
+            res = dot_product(Y.data(), &dU_new[( (i + 1) * (Ny + 2) + j + 2) * n], n)
+                    + dot_product(X.data(), &dU_new[((i + 1) * (Ny + 2) + j + 1) * n], n) 
+                    + dot_product(Z.data(), &dU_new[((i + 1) * (Ny + 2) + j) * n], n) - F; 
 
             inner_res_local += res * res;
         }

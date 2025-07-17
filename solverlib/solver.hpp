@@ -61,7 +61,7 @@ inline double compute_total_enthalpy(const double* V, int n_vel) {
     for (int i = 0; i < n_vel; ++i) 
         udotu += V[i + 1] * V[i + 1];
     
-    return (V[3] / (perfgam - 1) + 0.5 * V[0] * udotu + V[3]) / V[0];
+    return (V[n_vel + 1] / (perfgam - 1) + 0.5 * V[0] * udotu + V[n_vel + 1]) / V[0];
 }
 
 

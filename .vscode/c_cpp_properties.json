@@ -1,15 +1,20 @@
 {
     "configurations": [
         {
-            "name": "Linux",
+            "name": "Win32",
             "includePath": [
-                "${workspaceFolder}/**"
+                "${workspaceFolder}/**",
+                "C:/msys64/mingw64/include",               // Base MinGW include
+                "C:/msys64/mingw64/x86_64-w64-mingw32/include"  // Target-specific headers
             ],
-            "defines": [],
-            "compilerPath": "/usr/bin/gcc",
+            "defines": [
+                "_DEBUG",
+                "UNICODE"
+            ],
+            "compilerPath": "C:/msys64/mingw64/bin/g++.exe",  // Adjust path if you installed MSYS elsewhere
             "cStandard": "c11",
-            "cppStandard": "gnu++14",
-            "intelliSenseMode": "linux-gcc-x64"
+            "cppStandard": "gnu++17",
+            "intelliSenseMode": "windows-gcc-x64"
         }
     ],
     "version": 4
