@@ -66,11 +66,12 @@ void matmat_mult(const double* mat1, const double* mat2, double* res, int n) {
         }
     }
 }
+
 void matrix_divide(double* A, const double* B, double* X, int n, int m) {
     // Copy A because LU is in-place and we don't want to destroy the original
     std::vector<double> LU(A, A + n * n);
 
-    // In-place LU Decomposition
+    // In-place LU Decomposition (no pivoting)
     for (int k = 0; k < n; ++k) {
         for (int i = k + 1; i < n; ++i) {
             LU[i * n + k] /= LU[k * n + k];
@@ -83,22 +84,19 @@ void matrix_divide(double* A, const double* B, double* X, int n, int m) {
     std::vector<double> y(n, 0.0);
 
     for (int col = 0; col < m; ++col) {
-        const double* b = &B[col * n];  // column-major
-        double* x = &X[col * n];
-
         // Forward Substitution: Ly = b
         for (int i = 0; i < n; ++i) {
-            y[i] = b[i];
+            y[i] = B[i * m + col];  // row-major access
             for (int j = 0; j < i; ++j)
                 y[i] -= LU[i * n + j] * y[j];
         }
 
         // Backward Substitution: Ux = y
         for (int i = n - 1; i >= 0; --i) {
-            x[i] = y[i];
+            double sum = y[i];
             for (int j = i + 1; j < n; ++j)
-                x[i] -= LU[i * n + j] * x[j];
-            x[i] /= LU[i * n + i];
+                sum -= LU[i * n + j] * X[j * m + col];  // row-major
+            X[i * m + col] = sum / LU[i * n + i];
         }
     }
 }

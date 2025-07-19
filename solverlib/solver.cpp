@@ -342,7 +342,6 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet) : Nx(Nx), Ny(Ny),
     Vj = Vector(n);
     Vjj = Vector(n);
     Vp = Vector(n);
-    Vp = Vector(n);
     Vm = Vector(n);
     F_plus = Vector(n);
     F_minus = Vector(n);
@@ -361,7 +360,10 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet) : Nx(Nx), Ny(Ny),
     result_matrix = Vector(n * n, 0.0);
     result_vector1 = Vector(n, 0.0);
     result_vector2 = Vector(n, 0.0); 
-    I = identity(n);  
+    I = {1, 0, 0, 0,
+         0, 1, 0, 0,
+         0, 0, 1, 0,
+         0, 0, 0, 1};  
 
     // These hold the E matrices that never change for the boundary conditions. The first
     // indice is for left or bottom, while the second is for right and top. 
@@ -431,11 +433,11 @@ void Solver2D::form_inviscid_boundary_U() {
         }
     }
 
-    for (int i = 0; i < Nx_local; ++i) {
+    for (int i = 0; i < Nx_local + 2; ++i) {
 
         // Bottom ghost cell (j = 0), reference interior cell at j = 1
-        int bottom_interior_idx = ((i + 1) * (Ny + 2) + 1) * n;
-        int bottom_ghost_idx    = ((i + 1) * (Ny + 2) + 0) * n;
+        int bottom_interior_idx = (i * (Ny + 2) + 1) * n;
+        int bottom_ghost_idx    = (i * (Ny + 2) + 0) * n;
 
         Uholder = get_U_values(BCs.bottom, &U[bottom_interior_idx], 
                             jFxNorm[i * (Ny + 1) + 0], jFyNorm[i * (Ny + 1) + 0]);
@@ -444,8 +446,8 @@ void Solver2D::form_inviscid_boundary_U() {
             U[bottom_ghost_idx + k] = Uholder[k]; 
 
         // Top ghost cell (j = Ny + 1), reference interior cell at j = Ny
-        int top_interior_idx = ((i + 1) * (Ny + 2) + Ny) * n;
-        int top_ghost_idx    = ((i + 1) * (Ny + 2) + (Ny + 1)) * n;
+        int top_interior_idx = (i * (Ny + 2) + Ny) * n;
+        int top_ghost_idx    = (i * (Ny + 2) + Ny + 1) * n;
 
         Uholder = get_U_values(BCs.top, &U[top_interior_idx], 
                             jFxNorm[i * (Ny + 1) + Ny], jFyNorm[i * (Ny + 1) + Ny]);
@@ -578,16 +580,13 @@ Vector Solver2D::get_E_values(BCType type, double x_norm, double y_norm) {
         throw invalid_argument("Unknown boundary condition type.");        
     }
 }
-void Solver2D::exchange_ghost_cells() {
+void Solver2D::exchange_U_ghost_cells() {
     MPI_Status status_left, status_right;
 
     int col_size = Ny * n; // Exchange all variables for entire column of Ny cells. 
 
     Vector send_leftU(col_size), recv_leftU(col_size);
     Vector send_rightU(col_size), recv_rightU(col_size);
-
-    Vector send_leftdU(col_size), recv_leftdU(col_size);
-    Vector send_rightdU(col_size), recv_rightdU(col_size);
 
     /** This nested for loop creates vectors for each rank that just holds the innermost
      * real cells of the rank's chunk. These will be used to put into the ghost cell column of
@@ -603,9 +602,6 @@ void Solver2D::exchange_ghost_cells() {
 
             send_leftU[j * n + k] = U[local_left];
             send_rightU[j * n + k] = U[local_right];
-
-            send_leftdU[j * n + k] = dU_old[local_left];
-            send_rightdU[j * n + k] = dU_old[local_right];
         }
     }
 
@@ -633,17 +629,83 @@ void Solver2D::exchange_ghost_cells() {
         MPI_Sendrecv(send_leftU.data(), col_size, MPI_DOUBLE, rank - 1, 0,
                      recv_leftU.data(), col_size, MPI_DOUBLE, rank - 1, 1,
                      MPI_COMM_WORLD, &status_left);
-
-        MPI_Sendrecv(send_leftdU.data(), col_size, MPI_DOUBLE, rank - 1, 0,
-                     recv_leftdU.data(), col_size, MPI_DOUBLE, rank - 1, 0,
-                     MPI_COMM_WORLD, &status_left);
     }
 
     if (rank < size - 1) {
         MPI_Sendrecv(send_rightU.data(), col_size, MPI_DOUBLE, rank + 1, 1,
                      recv_rightU.data(), col_size, MPI_DOUBLE, rank + 1, 0,
                      MPI_COMM_WORLD, &status_right);
+    }
 
+
+    /** This nested for loop takes the send and receive buffs and puts the data
+     * from it into the ghost cell spots for each rank. 
+     */
+
+    for (int j = 0; j < Ny; ++j) {
+        for (int k = 0; k < n; ++k) {
+
+            if (rank > 0) {
+                int ghost_left = (0 * (Ny + 2) + (j + 1)) * n + k;
+                U[ghost_left] = recv_leftU[j * n + k];
+            }
+
+            if (rank < size - 1) {
+                int ghost_right = (Nx_local * (Ny + 2) + (j + 1)) * n + k;
+                U[ghost_right] = recv_rightU[j * n + k];
+            }
+
+        }
+    }
+
+    form_inviscid_boundary_U(); 
+}
+void Solver2D::exchange_dU_ghost_cells() {
+     MPI_Status status_left, status_right;
+
+    int col_size = Ny * n; // Exchange all variables for entire column of Ny cells. 
+
+    Vector send_leftdU(col_size), recv_leftdU(col_size);
+    Vector send_rightdU(col_size), recv_rightdU(col_size);
+
+     for (int j = 0; j < Ny; ++j) {
+        for (int k = 0; k < n; ++k) {
+
+            int local_left = (1 * (Ny + 2) + (j + 1)) * n + k;
+            int local_right = (Nx_local * (Ny + 2) + (j + 1)) * n + k;
+
+            send_leftdU[j * n + k] = dU_old[local_left];
+            send_rightdU[j * n + k] = dU_old[local_right];
+        }
+    }
+
+    /** This part sends and receives the left or right column depending on the if condition.  
+     * If rank > 0, then it send the left column since rank 0 doesnt send. If rank < size - 1, 
+     * it sends the right column since rank <size - 1> doesn't have a right column to send. 
+     * MPI_Sendrecv looks like this:
+     * 
+     * MPI_Sendrecv(    <data being send>
+     *                  <number of data points being sent>
+     *                  <MPI data type being sent>
+     *                  <destination of sent data>
+     *                  <send tag(just needs to be different)>
+     *                  <place to receive data>
+     *                  <number of data points being received>
+     *                  <MPI data type>
+     *                  <source of received data>
+     *                  <receive tag>
+     *                  <communication>
+     *                  <MPI_status *status>
+     *                                              )
+    */
+
+    if (rank > 0) {
+        MPI_Sendrecv(send_leftdU.data(), col_size, MPI_DOUBLE, rank - 1, 0,
+                     recv_leftdU.data(), col_size, MPI_DOUBLE, rank - 1, 0,
+                     MPI_COMM_WORLD, &status_left);
+    }
+
+    if (rank < size - 1) {
         MPI_Sendrecv(send_rightdU.data(), col_size, MPI_DOUBLE, rank + 1, 1,
                      recv_rightdU.data(), col_size, MPI_DOUBLE, rank + 1, 0,
                      MPI_COMM_WORLD, &status_right); 
@@ -659,159 +721,69 @@ void Solver2D::exchange_ghost_cells() {
 
             if (rank > 0) {
                 int ghost_left = (0 * (Ny + 2) + (j + 1)) * n + k;
-                U[ghost_left] = recv_leftU[j * n + k];
-
                 dU_old[ghost_left] = recv_leftdU[j * n + k];
             }
 
             if (rank < size - 1) {
                 int ghost_right = (Nx_local * (Ny + 2) + (j + 1)) * n + k;
-                U[ghost_right] = recv_rightU[j * n + k];
-
                 dU_old[ghost_right] = recv_rightdU[j * n + k];
             }
 
         }
     }
 
-    form_inviscid_boundary_U(); 
 }
-
 
 void Solver2D::solve() {
 
     int counter= 0;    
 
-    while (counter < 1) {
+    while (counter < 20) {
 
         if (rank == 0) cout << "-> Iteration: " << counter << endl << endl; 
 
-
-        exchange_ghost_cells();
-        if (rank == 0) cout << "-> Ghost cells exchanged and set. \n\n";
-        MPI_Barrier(MPI_COMM_WORLD);
-
+        exchange_U_ghost_cells();
 
         compute_dt();
-        if (rank == 0) cout << "-> dt computed. \n\n";
-        MPI_Barrier(MPI_COMM_WORLD);
+        if (rank == 0) cout << "-> dt computed: " << dt << "\n\n";
 
+        compute_ifluxes();
+        compute_jfluxes();
          
-        int in_counter = 0;
+        int in_counter = 0; 
 
-        cout << "U: " << endl;
-        for (int i = 0; i < Nx_local + 2; ++i) {
-            for (int j = 0; j < Ny + 2; ++j) {
-                cout << i << ", " << j << ": ";
-                for (int k = 0; k < n; ++k) {
-                    cout << U[(i * (Ny + 2) + j) * n + k] << " ";
-                }
-                cout << endl;
-            }
-        }
-
-        while (in_counter < 2) {
-
-            // I-FLUXES
-            compute_ifluxes();
-            if (rank == 0) cout << "-> i-Fluxes computed. \n\n";
-            MPI_Barrier(MPI_COMM_WORLD);
-
-            cout << "i-fluxes: " << endl;
-            for (int i = 0; i < Nx_local + 1; ++i) {
-                for (int j = 0; j < Ny; ++j) {
-                    cout << i << ", " << j << ": ";
-                    for (int k = 0; k < n; ++k) {
-                        cout << iFlux[(i * (Ny) + j) * n + k] << " ";
-                    }
-                    cout << endl;                
-                }
-            }
-
-            // J-FLUXES
-            compute_jfluxes();
-            if (rank == 0) cout << "-> j-Fluxes computed. \n\n";
-            MPI_Barrier(MPI_COMM_WORLD);
-
-            cout << "j-fluxes: " << endl;
-            for (int i = 0; i < Nx_local; ++i) {
-                for (int j = 0; j < Ny + 1; ++j) {
-                    cout << i << ", " << j << ": ";
-                    for (int k = 0; k < n; ++k) {
-                        cout << jFlux[(i * (Ny) + j) * n + k] << " ";
-                    }
-                    cout << endl;
-                
-                }
-            }
+        while (in_counter < 3) {
 
             // LEFT-LINE RELAX
             relax_left_line();
-            if (rank == 0) cout << "-> left-line relaxed. \n\n";         
-            MPI_Barrier(MPI_COMM_WORLD);
-
-
-            cout << "dU_new left line: " << endl;
-            for (int j = 0; j < Ny + 2; ++j) {
-                cout << 1 << ", " << j << ": ";
-                for (int k = 0; k < n; ++k) {
-                    cout << dU_new[(1 * (Ny + 2) + j) * n + k] << " ";
-                }
-                cout << endl;            
-            }
+            // if (rank == 0) cout << "-> left-line relaxed. \n\n";         
             
             // INNER-LINES RELAX
             relax_inner_lines();
-            if (rank == 0) cout << "-> middle lines relaxed. \n\n";
-            MPI_Barrier(MPI_COMM_WORLD);
-
-            cout << "dU_new inner lines: " << endl;
-            for (int i = 2; i < Nx_local; ++i) {
-                for (int j = 0; j < Ny + 2; ++j) {
-                    cout << i << ", " << j << ": ";
-                    for (int k = 0; k < n; ++k) {
-                        cout << dU_new[(1 * (Ny + 2) + j) * n + k] << " ";
-                    }
-                    cout << endl;       
-                }     
-            }
+            // if (rank == 0) cout << "-> middle lines relaxed. \n\n";
 
             // RIGHT LINE RELAX
             relax_right_line(); 
-            if (rank == 0) cout << "-> right line relaxed. \n\n";
-            MPI_Barrier(MPI_COMM_WORLD);
+            // if (rank == 0) cout << "-> right line relaxed. \n\n";
 
-            cout << "dU_new right line: " << endl;
-            for (int j = 0; j < Ny + 2; ++j) {
-                cout << Nx_local << ", " << j << ": ";
-                for (int k = 0; k < n; ++k) {
-                    cout << dU_new[(Nx_local * (Ny + 2) + j) * n + k] << " ";
+            for (int i = 0; i < Nx_local + 2; ++i) {
+                for (int j = 0; j < Ny + 2; ++j) {
+                    for (int k = 0; k < n; ++k) {
+                        int idx = (i * (Ny + 2) + j) * n;
+                        dU_old[idx + k] = dU_new[idx + k];
+                    }
                 }
-                cout << endl;            
             }
 
-            swap(dU_old, dU_new);
+            exchange_dU_ghost_cells(); 
 
             compute_inner_res();
-            if (rank == 0) cout << "-> inner residual computed: " << inner_res << "\n\n"; 
+            if (rank == 0) cout << "-> inner residual computed: " << inner_res << endl; 
+
             in_counter++;
-            cout << in_counter << endl;
         }
 
         update_U();
-
-        cout << "U_NEW: " << endl;
-        for (int i = 0; i < Nx_local + 2; ++i) {
-            for (int j = 0; j < Ny + 2; ++j) {
-                cout << i << ", " << j << ": ";
-                for (int k = 0; k < n; ++k) {
-                    cout << U[(i * (Ny + 2) + j) * n + k] << " ";
-                }
-                cout << endl;
-            }
-        }
-
-        if (rank == 0) cout << "-> U updated. \n\n"; 
         compute_outer_res(); 
         if (counter == 0) outer_res = 1.0;
         if (rank == 0) cout << "-> outer residual computed: " << outer_res << endl <<endl; 
@@ -843,22 +815,27 @@ void Solver2D::solve() {
         0, MPI_COMM_WORLD
     );
 
+    cout << "U_gathered created!" << endl;
+
+    string filename = "TESTING_PLOT.dat";
+    writeTecplotDat(filename); 
+
     if (rank == 0) cout << "Program finished!" << endl; 
 
 }
 void Solver2D::create_ramp_grid(double L, double inlet_height, double ramp_angle) {
 
-    Vector x_vertices( (Nx + 1) * (Ny + 1), 0.0),   
-    y_vertices( (Nx + 1) * (Ny + 1), 0.0),
-    x_cellCenters(Nx * Ny, 0.0),
-    y_cellCenters(Nx * Ny, 0.0),
-    iface_xNormals((Nx + 1) * Ny, 0.0),
-    iface_yNormals((Nx + 1) * Ny, 0.0),
-    jface_xNormals(Nx * (Ny + 1), 0.0),
-    jface_yNormals(Nx * (Ny + 1), 0.0),
-    iAreas((Nx + 1) * Ny, 0.0),
-    jAreas(Nx * (Ny + 1), 0.0),
-    cellVolumes(Nx * Ny, 0.0);
+    x_vertices = Vector( (Nx + 1) * (Ny + 1), 0.0),   
+    y_vertices = Vector( (Nx + 1) * (Ny + 1), 0.0),
+    x_cellCenters = Vector(Nx * Ny, 0.0),
+    y_cellCenters = Vector(Nx * Ny, 0.0),
+    iface_xNormals = Vector((Nx + 1) * Ny, 0.0),
+    iface_yNormals = Vector((Nx + 1) * Ny, 0.0),
+    jface_xNormals = Vector(Nx * (Ny + 1), 0.0),
+    jface_yNormals = Vector(Nx * (Ny + 1), 0.0),
+    iAreas = Vector((Nx + 1) * Ny, 0.0),
+    jAreas = Vector(Nx * (Ny + 1), 0.0),
+    cellVolumes = Vector(Nx * Ny, 0.0);
 
 
     if (rank == 0) {
@@ -1097,7 +1074,7 @@ void Solver2D::compute_ifluxes() {
             fi = i * Ny + j;
 
             nx = iFxNorm[fi];
-            ny = iFyNorm[fi];  
+            ny = iFyNorm[fi]; 
 
             constoprim(&U[ci * n], Vi.data(), n_vel);
             constoprim(&U[cii * n], Vii.data(), n_vel);  
@@ -1416,7 +1393,6 @@ void Solver2D::relax_left_line() {
                 dU_new[((i + 1) * (Ny + 2) * j + 1) * n + k] = v[j * n + k] - result_vector1[k];
             
         }
-
     }
 
 }
@@ -1545,7 +1521,6 @@ void Solver2D::relax_inner_lines() {
                 dU_new[((i + 1) * (Ny + 2) + j + 1) * n + k] = v[j * n + k] - result_vector1[k];
         }
     }
-
 }
 void Solver2D::relax_right_line() {
 
@@ -1674,8 +1649,8 @@ void Solver2D::relax_right_line() {
 
 void Solver2D::update_U() {
 
-    for (int i = 0; i < Nx_local + 2; ++i) {
-        for (int j = 0; j < Ny + 2; ++j) {
+    for (int i = 1; i < Nx_local + 1; ++i) {
+        for (int j = 1; j < Ny + 1; ++j) {
             int idx = (i + (Ny + 2) + j) * n;
             for (int k = 0; k < n; ++k) {
                 U[idx + k] += dU_old[idx + k];
@@ -1707,13 +1682,13 @@ void Solver2D::compute_dt() {
         }
     }
 
-    double dt_local = CFL / max_old; 
+    double dt_local = max_old; 
 
     double dt_global;
 
     MPI_Allreduce(&dt_local, &dt_global, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD); 
 
-    dt = dt_global; 
+    dt = CFL/dt_global; 
 
 }
 void Solver2D::compute_inner_res() {
@@ -1724,8 +1699,8 @@ void Solver2D::compute_inner_res() {
     double inner_res_local = 0.0;
     double F, res = 0.0;
 
-    for (int i = 2; i < Nx_local; ++i) {
-        for (int j = 2; j < Ny; ++j) {
+    for (int i = 1; i < Nx_local + 1; ++i) {
+        for (int j = 1; j < Ny + 1; ++j) {
 
             int LF = (i * Ny + j), RF = ((i + 1) * Ny + j), 
             BF = (i * (Ny + 1) + j), TF = (i * (Ny + 1) + j + 1),
@@ -1768,6 +1743,7 @@ void Solver2D::compute_inner_res() {
 }
 void Solver2D::compute_outer_res() {
     outer_res = 0.0;
+    double outer_res_local = 0.0;
     double intres;
 
     for (int i = 1; i < Nx_local - 1; ++i) {
@@ -1778,9 +1754,74 @@ void Solver2D::compute_outer_res() {
                         - jFlux[(i * (Ny + 1) + j) * n] * jArea[(i * (Ny + 1) + j)]
                         + jFlux[(i * (Ny + 1) + j + 1) * n] * jArea[i * (Ny + 1) + j + 1] ) / Volume[i * Ny + j];
 
-            outer_res += intres * intres;      
+            outer_res_local += intres * intres;      
+        }
+    }
+    MPI_Allreduce(&outer_res_local, &outer_res, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    outer_res = sqrt(outer_res); 
+}
+
+
+void Solver2D::writeTecplotDat(const string& filename) 
+
+{
+    ofstream file(filename);
+    file << "VARIABLES = \"x\", \"y\", \"density\", \"u-vel\", \"v-vel\", \"pressure\" \n";
+    file << "ZONE T=\"Flow Field\", I=" << Nx+1 << ", J=" << Ny+1 << ", F=BLOCK\n";
+    file << "VARLOCATION=([3-6]=CELLCENTERED)\n";
+
+
+    Vector V(n, 0.0); 
+
+
+    for (int i = 0; i < Nx + 1; ++i) {
+        for (int j = 0; j < Ny + 1; ++j) {
+            int idx = i * (Ny + 1) + j;
+            file << x_vertices[idx] << " " << "\n";
+        }
+    }
+    
+    for (int i = 0; i < Nx + 1; ++i) {
+        for (int j = 0; j < Ny + 1; ++j) {
+            int idx = i * (Ny + 1) + j;
+            file << y_vertices[idx] << " " << "\n";
         }
     }
 
-    outer_res = sqrt(outer_res); 
+    for (int i = 0; i < Nx; ++i) {  
+        for (int j = 0; j < Ny; ++j) {
+            int idx = i * Ny + j;
+            constoprim(&U[idx * n], V.data(), n_vel);
+            file << V[0] << " " << "\n";
+        }
+    }
+
+    
+    for (int i = 0; i < Nx; ++i) {  
+        for (int j = 0; j < Ny; ++j) {
+            int idx = i * Ny + j;
+            constoprim(&U[idx * n], V.data(), n_vel);
+            file << V[1] << " " << "\n";
+        }
+    }
+
+    for (int i = 0; i < Nx; ++i) {  
+        for (int j = 0; j < Ny; ++j) {
+            int idx = i * Ny + j;
+            constoprim(&U[idx * n], V.data(), n_vel);
+            file << V[2] << " " << "\n";
+        }
+    }
+
+    for (int i = 0; i < Nx; ++i) {  
+        for (int j = 0; j < Ny; ++j) {
+            int idx = i * Ny + j;
+            constoprim(&U[idx * n], V.data(), n_vel);
+            file << V[3] << " " << "\n";
+        }
+    }
+
+    cout << "File created!" << endl;
+
+    file.close();
 }

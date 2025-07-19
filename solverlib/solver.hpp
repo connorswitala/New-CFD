@@ -54,10 +54,10 @@ inline double computePressure(const double* U, int n_vel) {
     for (int i = 0; i < n_vel; ++i) 
         udotu += U[i + 1] * U[i + 1]; 
     
-    return (U[n_vel + 1] - 0.5 / (U[0] * U[0]) * udotu) * (perfgam - 1);
+    return (U[n_vel + 1] - 0.5 / U[0] * udotu) * (perfgam - 1);
 }
 inline double compute_total_enthalpy(const double* V, int n_vel) {
-    double udotu;
+    double udotu = 0.0;
     for (int i = 0; i < n_vel; ++i) 
         udotu += V[i + 1] * V[i + 1];
     
@@ -133,7 +133,8 @@ public:
 
     void solve();
 
-    void exchange_ghost_cells();
+    void exchange_U_ghost_cells();
+    void exchange_dU_ghost_cells(); 
     void form_inviscid_boundary_U(); 
     Vector get_U_values(BCType type, double* U_inner, double x_norm, double y_norm);
     void form_inviscid_boundary_E();
@@ -152,5 +153,7 @@ public:
     void update_U();
 
     void create_ramp_grid(double L, double inlet_height, double ramp_angle);
+
+    void writeTecplotDat(const string& filename);
 
 };
