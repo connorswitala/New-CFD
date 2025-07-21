@@ -3,11 +3,11 @@
 
 int main(int argc, char* argv[]) {
 
-    int Nx = 2000, Ny = 1000;
+    int Nx = 400, Ny = 200;
     double CFL = 0.5; 
 
 
-    Vector V_inlet = {0.01, 1000, 0.0, 10000};
+    Vector V_inlet = {0.01, 4000, 0.0, 10000};
     Vector U_inlet(4, 0.0);
 
     primtocons(U_inlet.data(), V_inlet.data(), 2);
@@ -19,5 +19,7 @@ int main(int argc, char* argv[]) {
     solver.solve(); 
  
     MPI_Finalize(); 
+
+    return 0;
 
 }

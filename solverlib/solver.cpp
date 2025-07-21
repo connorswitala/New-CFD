@@ -293,7 +293,9 @@ void SodSolver1D::solve() {
 //////// Solver2D Functions ////////
 ////////////////////////////////////
 
-Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet) : Nx(Nx), Ny(Ny), CFL(CFL), U_inlet(U_inlet), BCs(BCType::Inlet, BCType::Outlet, BCType::Symmetry, BCType::Symmetry) {
+Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet) : 
+    Nx(Nx), Ny(Ny), CFL(CFL), U_inlet(U_inlet), 
+    BCs(BCType::Inlet, BCType::Outlet, BCType::Symmetry, BCType::Symmetry) {
     
 
     MPI_Comm_rank(MPI_COMM_WORLD, &rank); 
@@ -315,7 +317,7 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet) : Nx(Nx), Ny(Ny),
      */
 
 
-    create_ramp_grid(3, 1, 15); 
+    create_ramp_grid(3, 0.75, 15); 
 
     U_gathered = Vector( num_gathered_cells * n, 0.0); 
     U = Vector((Nx_local + 2) * (Ny + 2) * n, 0.0);  
@@ -649,7 +651,7 @@ void Solver2D::exchange_U_ghost_cells() {
             }
 
             if (rank < size - 1) {
-                int ghost_right = (Nx_local * (Ny + 2) + j) * n + k;
+                int ghost_right = ( (Nx_local + 1) * (Ny + 2) + j) * n + k;
                 U[ghost_right] = recv_rightU[j * n + k];
             }
 
@@ -728,53 +730,56 @@ void Solver2D::solve() {
 
         compute_ifluxes();
         compute_jfluxes();
-         
-        // int in_counter = 0; 
 
-    //     while (inner_res > 1e-8) {
 
-    //         // LEFT-LINE RELAX
-    //         relax_left_line();
-    //         // if (rank == 0) cout << "-> left-line relaxed. \n\n";         
+        int in_counter = 0; 
+
+        while (inner_res > 1e-8) {
+
+            // LEFT-LINE RELAX
+            relax_left_line();
+            // if (rank == 0) cout << "-> left-line relaxed. \n\n";         
             
-    //         // INNER-LINES RELAX
-    //         relax_inner_lines();
-    //         // if (rank == 0) cout << "-> middle lines relaxed. \n\n";
+            // INNER-LINES RELAX
+            relax_inner_lines();
+            // if (rank == 0) cout << "-> middle lines relaxed. \n\n";
 
-    //         // RIGHT LINE RELAX
-    //         relax_right_line(); 
-    //         // if (rank == 0) cout << "-> right line relaxed. \n\n";
+            // RIGHT LINE RELAX
+            relax_right_line(); 
+            // if (rank == 0) cout << "-> right line relaxed. \n\n";
 
-    //         for (int i = 0; i < Nx_local + 2; ++i) {
-    //             for (int j = 0; j < Ny + 2; ++j) {
-    //                 int idx = (i * (Ny + 2) + j) * n;
-    //                 for (int k = 0; k < n; ++k) {
-    //                     dU_old[idx + k] = dU_new[idx + k];
-    //                 }
-    //             }
-    //         }
+            for (int i = 0; i < Nx_local + 2; ++i) {
+                for (int j = 0; j < Ny + 2; ++j) {
+                    int idx = (i * (Ny + 2) + j) * n;
+                    for (int k = 0; k < n; ++k) {
+                        dU_old[idx + k] = dU_new[idx + k];
+                    }
+                }
+            }
 
-    //         exchange_dU_ghost_cells(); 
+            exchange_dU_ghost_cells(); 
 
-    //         compute_inner_res();
+            compute_inner_res();
 
-    //         in_counter++;
-    //     }
+            in_counter++;
+        }
        
-        explicit_update(); 
+        // explicit_update(); 
+
         update_U(); 
+
         compute_outer_res(); 
+ 
         if (counter == 0) outer_res = 1.0;
 
         counter++;
 
-        if (counter % 1 == 0) 
+        if (counter % 100 == 0) 
             if (rank == 0) cout << "Iteration: " << counter
                 << "\tResidual: " << fixed << scientific << setprecision(3) << outer_res
                 << "\tdt: " << fixed << scientific << setprecision(5) << dt << endl; 
     }
 
-    if (rank == 0) cout << "Outside main loop." << endl;
 
     Vector U_sendbuf(Nx_local * Ny * n, 0.0);
 
@@ -787,7 +792,6 @@ void Solver2D::solve() {
         }
     }
 
-    if (rank == 0) cout << "Before gatherv" << endl; 
     vector<int> recvcounts(size);
     vector<int> displs(size);
 
@@ -802,7 +806,7 @@ void Solver2D::solve() {
         U_sendbuf.data(), Nx_local * Ny * n, MPI_DOUBLE,
         U_gathered.data(), recvcounts.data(), displs.data(), MPI_DOUBLE,
         0, MPI_COMM_WORLD
-    );
+    );        
 
     string filename = "TESTING_PLOT.dat";
     writeTecplotDat(filename); 
@@ -810,7 +814,7 @@ void Solver2D::solve() {
     double end_time = MPI_Wtime();
 
     if (rank == 0) {
-    std::cout << "Elapsed time: " << end_time - start_time << " seconds\n";
+        cout << "Elapsed time: " << end_time - start_time << " seconds\n";
     }
     if (rank == 0) cout << "Program finished!" << endl; 
 
@@ -965,17 +969,25 @@ void Solver2D::create_ramp_grid(double L, double inlet_height, double ramp_angle
             jf_sendcounts(size), jf_displacements(size);
 
     int base = Nx / size;
-    int rem = Nx % size; 
+    int rem = Nx % size;
 
-    int cc_offset = 0;
     for (int r = 0; r < size; ++r) {
-        local_Nx[r]       = base + (r < rem ? 1 : 0);
-        cc_displacements[r]  = cc_offset;
-        cc_sendcounts[r]     = local_Nx[r] * Ny;
-        cc_offset           += local_Nx[r] * Ny;
+        local_Nx[r] = base + (r < rem ? 1 : 0);
     }
 
+
+    int cc_offset = 0;
+    if (rank == 0) {
+        for (int r = 0; r < size; ++r) {
+            cc_displacements[r] = cc_offset;
+            cc_sendcounts[r] = local_Nx[r] * Ny;
+            cc_offset += cc_sendcounts[r];
+        }
+    }
+
+    // Broadcast each rank's local_Nx[rank] so they know their size
     Nx_local = local_Nx[rank]; 
+ 
     num_ifaces = (Nx_local + 1) * Ny; 
     num_jfaces = (Ny + 1) * Nx_local; 
     num_loc_cells = Nx_local * Ny; 
@@ -1001,16 +1013,13 @@ void Solver2D::create_ramp_grid(double L, double inlet_height, double ramp_angle
 
 
     // For i-faces now
-    int iface_offset = 0;
-    for (int r = 0; r < size; ++r) {
-        if_sendcounts[r]    = (local_Nx[r] + 1) * Ny; // includes overlap
-        if (rank == 0) {
-            if_displacements[r] = 0;
+    if (rank == 0) {
+        int offset = 0;
+        for (int r = 0; r < size; ++r) {
+            if_sendcounts[r] = (local_Nx[r] + 1) * Ny;
+            if_displacements[r] = offset;
+            offset += if_sendcounts[r] - Ny;
         }
-        else { 
-            if_displacements[r] = iface_offset - Ny;
-        }
-        iface_offset     += (local_Nx[r] + 1) * Ny;
     }
 
     // Scatter i-face normals and areas
@@ -1031,11 +1040,13 @@ void Solver2D::create_ramp_grid(double L, double inlet_height, double ramp_angle
 
 
     // For j-faces now
-    int jface_offset = 0;
-    for (int r = 0; r < size; ++r) {
-        jf_sendcounts[r]    = local_Nx[r] * (Ny + 1); // includes overlap
-        jf_displacements[r] = jface_offset;
-        jface_offset     += (local_Nx[r]) * (Ny + 1);
+    if (rank == 0) {
+        int jface_offset = 0;
+        for (int r = 0; r < size; ++r) {
+            jf_sendcounts[r]    = local_Nx[r] * (Ny + 1); // includes overlap
+            jf_displacements[r] = jface_offset;
+            jface_offset     += local_Nx[r] * (Ny + 1);
+        }
     }
 
     // Scatter j-face normals and areas
@@ -1750,8 +1761,8 @@ void Solver2D::compute_outer_res() {
     double outer_res_local = 0.0;
     double intres;
 
-    for (int i = 1; i < Nx_local - 1; ++i) {
-        for (int j = 1; j < Ny - 1; ++j) {
+    for (int i = 0; i < Nx_local; ++i) {
+        for (int j = 0; j < Ny; ++j) {
 
             intres = (- iFlux[(i * Ny + j) * n] * iArea[i * Ny + j]
                         + iFlux[((i + 1) * Ny + j) * n] * iArea[(i + 1) * Ny + j]
@@ -1788,66 +1799,99 @@ void Solver2D::explicit_update() {
     }
 }
 
-void Solver2D::writeTecplotDat(const string& filename) 
 
-{
+void Solver2D::print_by_rank(Vector Vec, int nx, int ny, int nvars, string name){
+
+    for (int r = 0; r < size; ++r) {
+        MPI_Barrier(MPI_COMM_WORLD);  // Synchronize before each rank prints
+        if (rank == r) {
+            std::cout << "========== Rank " << rank << " ==========" << std::endl;
+            for (int i = 0; i < nx; ++i) {
+                for (int j = 0; j < ny; ++j) { 
+                    int cell_idx = (i * ny + j) * nvars;  // assuming i-fastest
+                    std::cout << name << " [" << i << ", " << j << "]: ";
+                    for (int k = 0; k < nvars; ++k) {
+                        std::cout << Vec[cell_idx + k] << " ";
+                    }
+                    std::cout << "\n";
+                }
+            }
+            std::cout << std::flush;
+        }
+    }
+
+}
+
+void Solver2D::writeTecplotDat(const string& filename) {
+    if (rank != 0) return;
+
     ofstream file(filename);
-    file << "VARIABLES = \"x\", \"y\", \"density\", \"u-vel\", \"v-vel\", \"pressure\" \n";
-    file << "ZONE T=\"Flow Field\", I=" << Nx+1 << ", J=" << Ny+1 << ", F=BLOCK\n";
+    file << "VARIABLES = \"x\", \"y\", \"density\", \"u-vel\", \"v-vel\", \"pressure\"\n";
+    file << "ZONE T=\"Flow Field\", I=" << Nx + 1 << ", J=" << Ny + 1 << ", F=BLOCK\n";
     file << "VARLOCATION=([3-6]=CELLCENTERED)\n";
 
-
-    Vector V(n, 0.0); 
-
-
-    for (int i = 0; i < Nx + 1; ++i) {
-        for (int j = 0; j < Ny + 1; ++j) {
+    // Write X vertices (node-centered, i-fastest)
+    for (int j = 0; j < Ny + 1; ++j) {
+        for (int i = 0; i < Nx + 1; ++i) {
             int idx = i * (Ny + 1) + j;
-            file << x_vertices[idx] << " " << "\n";
+            file << x_vertices[idx] << "\n";
         }
     }
-    
-    for (int i = 0; i < Nx + 1; ++i) {
-        for (int j = 0; j < Ny + 1; ++j) {
+
+    // Write Y vertices (node-centered, i-fastest)
+    for (int j = 0; j < Ny + 1; ++j) {
+        for (int i = 0; i < Nx + 1; ++i) {
             int idx = i * (Ny + 1) + j;
-            file << y_vertices[idx] << " " << "\n";
+            file << y_vertices[idx] << "\n";
         }
     }
 
-    for (int i = 0; i < Nx; ++i) {  
-        for (int j = 0; j < Ny; ++j) {
+    // Allocate temporary variable to hold primitive variables
+    Vector V(n, 0.0);
+
+    // Create buffers for each cell-centered variable
+    Vector density(Nx * Ny), uvel(Nx * Ny), vvel(Nx * Ny), pressure(Nx * Ny);
+
+    // Extract and store all primitive variables first (i-fastest)
+    for (int j = 0; j < Ny; ++j) {
+        for (int i = 0; i < Nx; ++i) {
             int idx = i * Ny + j;
             constoprim(&U_gathered[idx * n], V.data(), n_vel);
-            file << V[0] << " " << "\n";
+            density[idx]  = V[0];
+            uvel[idx]     = V[1];
+            vvel[idx]     = V[2];
+            pressure[idx] = V[3];
         }
     }
 
-    
-    for (int i = 0; i < Nx; ++i) {  
-        for (int j = 0; j < Ny; ++j) {
+    // Write each variable block (i-fastest order)
+    for (int j = 0; j < Ny; ++j) {
+        for (int i = 0; i < Nx; ++i) {
             int idx = i * Ny + j;
-            constoprim(&U_gathered[idx * n], V.data(), n_vel);
-            file << V[1] << " " << "\n";
+            file << density[idx] << "\n";
         }
     }
 
-    for (int i = 0; i < Nx; ++i) {  
-        for (int j = 0; j < Ny; ++j) {
+    for (int j = 0; j < Ny; ++j) {
+        for (int i = 0; i < Nx; ++i) {
             int idx = i * Ny + j;
-            constoprim(&U_gathered[idx * n], V.data(), n_vel);
-            file << V[2] << " " << "\n";
+            file << uvel[idx] << "\n";
         }
     }
 
-    for (int i = 0; i < Nx; ++i) {  
-        for (int j = 0; j < Ny; ++j) {
+    for (int j = 0; j < Ny; ++j) {  
+        for (int i = 0; i < Nx; ++i) {
             int idx = i * Ny + j;
-            constoprim(&U_gathered[idx * n], V.data(), n_vel);
-            file << V[3] << " " << "\n";
+            file << vvel[idx] << "\n";
         }
     }
 
-    if (rank == 0) cout << "File created: " << filename << endl;
+    for (int j = 0; j < Ny; ++j) {
+        for (int i = 0; i < Nx; ++i) {
+            int idx = i * Ny + j;
+            file << pressure[idx] << "\n";
+        }
+    }
 
-    file.close();
+    cout << "File created: " << filename << std::endl;
 }
