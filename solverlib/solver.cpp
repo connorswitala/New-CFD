@@ -316,7 +316,6 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet) : Nx(Nx), Ny(Ny),
 
 
     create_ramp_grid(3, 1, 15); 
-    if (rank == 0) cout << endl << "-> Geometry created succesfully and scattered to all ranks. \n\n"; 
 
     U_gathered = Vector( num_gathered_cells * n, 0.0); 
     U = Vector((Nx_local + 2) * (Ny + 2) * n, 0.0);  
@@ -388,11 +387,10 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet) : Nx(Nx), Ny(Ny),
                 U[(i * (Ny + 2) + j) * n + k] = U_inlet[k];
             }
         }
-    }
-    if (rank == 0) cout << "-> U initialized! \n\n";
+    }  
     
     form_inviscid_boundary_E(); 
-    if (rank == 0) cout << "-> form_inviscid_boundary_E successfully called and completed. \n\n";
+  
 }
 
 
@@ -406,10 +404,10 @@ void Solver2D::form_inviscid_boundary_U() {
     Vector Uholder(n, 0.0); 
 
     if (rank == 0) {
-        for (int j = 0; j < Ny + 2; ++j) {
+        for (int j = 0; j < Ny; ++j) {
             // Interior cell (1, j)
-            int inner_idx  = (1 * (Ny + 2) + j) * n;
-            int ghost_idx  = (0 * (Ny + 2) + j) * n;
+            int inner_idx  = (1 * (Ny + 2) + j + 1) * n;
+            int ghost_idx  = (0 * (Ny + 2) + j + 1) * n;
 
             Uholder = get_U_values(BCs.left, &U[inner_idx], iFxNorm[j], iFyNorm[j]);
 
@@ -419,10 +417,10 @@ void Solver2D::form_inviscid_boundary_U() {
     }
 
     if (rank == size - 1) {
-        for (int j = 0; j < Ny + 2; ++j) {
+        for (int j = 0; j < Ny; ++j) {
             // Interior cell (Nx_local, j)
-            int inner_idx = (Nx_local * (Ny + 2) + j) * n;
-            int ghost_idx = ((Nx_local + 1) * (Ny + 2) + j) * n;
+            int inner_idx = (Nx_local * (Ny + 2) + j + 1) * n;
+            int ghost_idx = ((Nx_local + 1) * (Ny + 2) + j + 1) * n;
 
             Uholder = get_U_values(BCs.right, &U[inner_idx],
                                 iFxNorm[Nx_local * Ny + j],
@@ -433,11 +431,11 @@ void Solver2D::form_inviscid_boundary_U() {
         }
     }
 
-    for (int i = 0; i < Nx_local + 2; ++i) {
+    for (int i = 0; i < Nx_local; ++i) {
 
         // Bottom ghost cell (j = 0), reference interior cell at j = 1
-        int bottom_interior_idx = (i * (Ny + 2) + 1) * n;
-        int bottom_ghost_idx    = (i * (Ny + 2) + 0) * n;
+        int bottom_interior_idx = ((i + 1) * (Ny + 2) + 1) * n;
+        int bottom_ghost_idx    = ((i + 1) * (Ny + 2) + 0) * n;
 
         Uholder = get_U_values(BCs.bottom, &U[bottom_interior_idx], 
                             jFxNorm[i * (Ny + 1) + 0], jFyNorm[i * (Ny + 1) + 0]);
@@ -446,8 +444,8 @@ void Solver2D::form_inviscid_boundary_U() {
             U[bottom_ghost_idx + k] = Uholder[k]; 
 
         // Top ghost cell (j = Ny + 1), reference interior cell at j = Ny
-        int top_interior_idx = (i * (Ny + 2) + Ny) * n;
-        int top_ghost_idx    = (i * (Ny + 2) + Ny + 1) * n;
+        int top_interior_idx = ((i + 1) * (Ny + 2) + Ny) * n;
+        int top_ghost_idx    = ((i + 1) * (Ny + 2) + Ny + 1) * n;
 
         Uholder = get_U_values(BCs.top, &U[top_interior_idx], 
                             jFxNorm[i * (Ny + 1) + Ny], jFyNorm[i * (Ny + 1) + Ny]);
@@ -474,38 +472,38 @@ Vector Solver2D::get_U_values(BCType type, double* U_inner, double x_norm, doubl
 
     case BCType::IsothermalWall:
 
-		u = U[1] / U[0];
-		v = U[2] / U[0];
+		u = U_inner[1] / U_inner[0];
+		v = U_inner[2] / U_inner[0];
 
-		ghost[0] = U[0];
-		ghost[1] = U[0] * (u - 2 * (u * x_norm + v * y_norm) * x_norm);
-		ghost[2] = U[0] * (v - 2 * (u * x_norm + v * y_norm) * y_norm);
-		ghost[3] = U[3];
+		ghost[0] = U_inner[0];
+		ghost[1] = U_inner[0] * (u - 2 * (u * x_norm + v * y_norm) * x_norm);
+		ghost[2] = U_inner[0] * (v - 2 * (u * x_norm + v * y_norm) * y_norm);
+		ghost[3] = U_inner[3];
 
         return ghost;
         
 
     case BCType::AdiabaticWall:
 
-        u = U[1] / U[0];
-		v = U[2] / U[0];
+		u = U_inner[1] / U_inner[0];
+		v = U_inner[2] / U_inner[0];
 
-		ghost[0] = U[0];
-		ghost[1] = U[0] * (u - 2 * (u * x_norm + v * y_norm) * x_norm);
-		ghost[2] = U[0] * (v - 2 * (u * x_norm + v * y_norm) * y_norm);
-		ghost[3] = U[3];
+		ghost[0] = U_inner[0];
+		ghost[1] = U_inner[0] * (u - 2 * (u * x_norm + v * y_norm) * x_norm);
+		ghost[2] = U_inner[0] * (v - 2 * (u * x_norm + v * y_norm) * y_norm);
+		ghost[3] = U_inner[3];
 
         return ghost;
 
     case BCType::Symmetry:
 
-        u = U[1] / U[0];
-		v = U[2] / U[0];
+		u = U_inner[1] / U_inner[0];
+		v = U_inner[2] / U_inner[0];
 
-		ghost[0] = U[0];
-		ghost[1] = U[0] * (u - 2 * (u * x_norm + v * y_norm) * x_norm);
-		ghost[2] = U[0] * (v - 2 * (u * x_norm + v * y_norm) * y_norm);
-		ghost[3] = U[3];
+		ghost[0] = U_inner[0];
+		ghost[1] = U_inner[0] * (u - 2 * (u * x_norm + v * y_norm) * x_norm);
+		ghost[2] = U_inner[0] * (v - 2 * (u * x_norm + v * y_norm) * y_norm);
+		ghost[3] = U_inner[3];
 
         return ghost;
 
@@ -583,7 +581,7 @@ Vector Solver2D::get_E_values(BCType type, double x_norm, double y_norm) {
 void Solver2D::exchange_U_ghost_cells() {
     MPI_Status status_left, status_right;
 
-    int col_size = Ny * n; // Exchange all variables for entire column of Ny cells. 
+    int col_size = (Ny + 2) * n; // Exchange all variables for entire column of Ny cells. 
 
     Vector send_leftU(col_size), recv_leftU(col_size);
     Vector send_rightU(col_size), recv_rightU(col_size);
@@ -594,11 +592,11 @@ void Solver2D::exchange_U_ghost_cells() {
      */
 
 
-    for (int j = 0; j < Ny; ++j) {
+    for (int j = 0; j < Ny + 2; ++j) {
         for (int k = 0; k < n; ++k) {
 
-            int local_left = (1 * (Ny + 2) + (j + 1)) * n + k;
-            int local_right = (Nx_local * (Ny + 2) + (j + 1)) * n + k;
+            int local_left = (1 * (Ny + 2) + j) * n + k;
+            int local_right = (Nx_local * (Ny + 2) + j ) * n + k;
 
             send_leftU[j * n + k] = U[local_left];
             send_rightU[j * n + k] = U[local_right];
@@ -642,16 +640,16 @@ void Solver2D::exchange_U_ghost_cells() {
      * from it into the ghost cell spots for each rank. 
      */
 
-    for (int j = 0; j < Ny; ++j) {
+    for (int j = 0; j < Ny + 2; ++j) {
         for (int k = 0; k < n; ++k) {
 
             if (rank > 0) {
-                int ghost_left = (0 * (Ny + 2) + (j + 1)) * n + k;
+                int ghost_left = (0 * (Ny + 2) + j) * n + k;
                 U[ghost_left] = recv_leftU[j * n + k];
             }
 
             if (rank < size - 1) {
-                int ghost_right = (Nx_local * (Ny + 2) + (j + 1)) * n + k;
+                int ghost_right = (Nx_local * (Ny + 2) + j) * n + k;
                 U[ghost_right] = recv_rightU[j * n + k];
             }
 
@@ -679,25 +677,6 @@ void Solver2D::exchange_dU_ghost_cells() {
         }
     }
 
-    /** This part sends and receives the left or right column depending on the if condition.  
-     * If rank > 0, then it send the left column since rank 0 doesnt send. If rank < size - 1, 
-     * it sends the right column since rank <size - 1> doesn't have a right column to send. 
-     * MPI_Sendrecv looks like this:
-     * 
-     * MPI_Sendrecv(    <data being send>
-     *                  <number of data points being sent>
-     *                  <MPI data type being sent>
-     *                  <destination of sent data>
-     *                  <send tag(just needs to be different)>
-     *                  <place to receive data>
-     *                  <number of data points being received>
-     *                  <MPI data type>
-     *                  <source of received data>
-     *                  <receive tag>
-     *                  <communication>
-     *                  <MPI_status *status>
-     *                                              )
-    */
 
     if (rank > 0) {
         MPI_Sendrecv(send_leftdU.data(), col_size, MPI_DOUBLE, rank - 1, 0,
@@ -736,67 +715,66 @@ void Solver2D::exchange_dU_ghost_cells() {
 
 void Solver2D::solve() {
 
+    double start_time = MPI_Wtime();
+
+    if (rank == 0) cout << "Starting solve!" << endl;
     int counter= 0;    
 
-    while (counter < 20) {
+    while (outer_res > 1e-6) {
 
-        if (rank == 0) cout << "-> Iteration: " << counter << endl << endl; 
-
-        exchange_U_ghost_cells();
+        exchange_U_ghost_cells(); 
 
         compute_dt();
-        if (rank == 0) cout << "-> dt computed: " << dt << "\n\n";
 
         compute_ifluxes();
         compute_jfluxes();
          
-        int in_counter = 0; 
+        // int in_counter = 0; 
 
-        while (in_counter < 3) {
+    //     while (inner_res > 1e-8) {
 
-            // LEFT-LINE RELAX
-            relax_left_line();
-            // if (rank == 0) cout << "-> left-line relaxed. \n\n";         
+    //         // LEFT-LINE RELAX
+    //         relax_left_line();
+    //         // if (rank == 0) cout << "-> left-line relaxed. \n\n";         
             
-            // INNER-LINES RELAX
-            relax_inner_lines();
-            // if (rank == 0) cout << "-> middle lines relaxed. \n\n";
+    //         // INNER-LINES RELAX
+    //         relax_inner_lines();
+    //         // if (rank == 0) cout << "-> middle lines relaxed. \n\n";
 
-            // RIGHT LINE RELAX
-            relax_right_line(); 
-            // if (rank == 0) cout << "-> right line relaxed. \n\n";
+    //         // RIGHT LINE RELAX
+    //         relax_right_line(); 
+    //         // if (rank == 0) cout << "-> right line relaxed. \n\n";
 
-            for (int i = 0; i < Nx_local + 2; ++i) {
-                for (int j = 0; j < Ny + 2; ++j) {
-                    for (int k = 0; k < n; ++k) {
-                        int idx = (i * (Ny + 2) + j) * n;
-                        dU_old[idx + k] = dU_new[idx + k];
-                    }
-                }
-            }
+    //         for (int i = 0; i < Nx_local + 2; ++i) {
+    //             for (int j = 0; j < Ny + 2; ++j) {
+    //                 int idx = (i * (Ny + 2) + j) * n;
+    //                 for (int k = 0; k < n; ++k) {
+    //                     dU_old[idx + k] = dU_new[idx + k];
+    //                 }
+    //             }
+    //         }
 
-            exchange_dU_ghost_cells(); 
+    //         exchange_dU_ghost_cells(); 
 
-            compute_inner_res();
-            if (rank == 0) cout << "-> inner residual computed: " << inner_res << endl; 
+    //         compute_inner_res();
 
-            in_counter++;
-        }
-
-        update_U();
+    //         in_counter++;
+    //     }
+       
+        explicit_update(); 
+        update_U(); 
         compute_outer_res(); 
         if (counter == 0) outer_res = 1.0;
-        if (rank == 0) cout << "-> outer residual computed: " << outer_res << endl <<endl; 
 
         counter++;
 
-        if (counter % 100 == 0) 
-            cout << "Iteration: " << counter
+        if (counter % 1 == 0) 
+            if (rank == 0) cout << "Iteration: " << counter
                 << "\tResidual: " << fixed << scientific << setprecision(3) << outer_res
                 << "\tdt: " << fixed << scientific << setprecision(5) << dt << endl; 
     }
 
-    if (rank == 0) cout << "Exited main loop" << endl;
+    if (rank == 0) cout << "Outside main loop." << endl;
 
     Vector U_sendbuf(Nx_local * Ny * n, 0.0);
 
@@ -809,17 +787,31 @@ void Solver2D::solve() {
         }
     }
 
-    MPI_Gather(
+    if (rank == 0) cout << "Before gatherv" << endl; 
+    vector<int> recvcounts(size);
+    vector<int> displs(size);
+
+    int offset = 0;
+    for (int r = 0; r < size; ++r) {
+        recvcounts[r] = local_Nx[r] * Ny * n; // number of elements each rank sends
+        displs[r] = offset;
+        offset += recvcounts[r];
+    }
+
+    MPI_Gatherv(
         U_sendbuf.data(), Nx_local * Ny * n, MPI_DOUBLE,
-        U_gathered.data(), Nx_local * Ny * n, MPI_DOUBLE,
+        U_gathered.data(), recvcounts.data(), displs.data(), MPI_DOUBLE,
         0, MPI_COMM_WORLD
     );
-
-    cout << "U_gathered created!" << endl;
 
     string filename = "TESTING_PLOT.dat";
     writeTecplotDat(filename); 
 
+    double end_time = MPI_Wtime();
+
+    if (rank == 0) {
+    std::cout << "Elapsed time: " << end_time - start_time << " seconds\n";
+    }
     if (rank == 0) cout << "Program finished!" << endl; 
 
 }
@@ -952,7 +944,7 @@ void Solver2D::create_ramp_grid(double L, double inlet_height, double ramp_angle
 
                 CD = { x_vertices[iij] - x_vertices[ij], y_vertices[iij] - y_vertices[ij] };
 
-                int face_ij = i * Ny + j;
+                int face_ij = i * (Ny + 1) + j;
 
                 jAreas[face_ij] = sqrt(CD.x * CD.x + CD.y * CD.y);
 
@@ -967,7 +959,8 @@ void Solver2D::create_ramp_grid(double L, double inlet_height, double ramp_angle
         }
     } 
 
-    vector<int> local_Nx(size), cc_sendcounts(size), cc_displacements(size), 
+    local_Nx = Vector(size);
+    vector<int> cc_sendcounts(size), cc_displacements(size), 
             if_sendcounts(size), if_displacements(size) , 
             jf_sendcounts(size), jf_displacements(size);
 
@@ -1011,7 +1004,12 @@ void Solver2D::create_ramp_grid(double L, double inlet_height, double ramp_angle
     int iface_offset = 0;
     for (int r = 0; r < size; ++r) {
         if_sendcounts[r]    = (local_Nx[r] + 1) * Ny; // includes overlap
-        if_displacements[r] = iface_offset;
+        if (rank == 0) {
+            if_displacements[r] = 0;
+        }
+        else { 
+            if_displacements[r] = iface_offset - Ny;
+        }
         iface_offset     += (local_Nx[r] + 1) * Ny;
     }
 
@@ -1037,7 +1035,7 @@ void Solver2D::create_ramp_grid(double L, double inlet_height, double ramp_angle
     for (int r = 0; r < size; ++r) {
         jf_sendcounts[r]    = local_Nx[r] * (Ny + 1); // includes overlap
         jf_displacements[r] = jface_offset;
-        jface_offset     += local_Nx[r] * (Ny + 1);
+        jface_offset     += (local_Nx[r]) * (Ny + 1);
     }
 
     // Scatter j-face normals and areas
@@ -1064,10 +1062,10 @@ void Solver2D::compute_ifluxes() {
     int ci, cii, fi; 
     double weight, pi, pii, dp, nx, ny, rho, u, v, p, ho, uprime, a, lp, lm, l, lt, lc;  
     double g = 5.72, pe = perfgam - 1; 
+    // cout << "I FLUXES:" << endl; 
 
     for (int i = 0; i < Nx_local + 1; ++i) {
         for (int j = 0; j < Ny; ++j) { 
-
             
             ci = i * (Ny + 2) + j + 1;
             cii = (i + 1) * (Ny + 2) + j + 1; 
@@ -1157,8 +1155,12 @@ void Solver2D::compute_ifluxes() {
 
             matvec_mult(&iMinus_A[fi * n * n], &U[cii * n], F_minus.data(), n);  
 
-            for (int k = 0; k < n; ++k) 
+            // cout << i << ", " << j << ": ";
+            for (int k = 0; k < n; ++k) {
                 iFlux[fi * n + k] = F_plus[k] + F_minus[k]; 
+                // cout << iFlux[fi * n + k] << " ";
+            }
+            // cout << "\t nx = " << nx << " ny = " << ny << endl;
 
         }
     }
@@ -1168,10 +1170,10 @@ void Solver2D::compute_jfluxes() {
     int cj, cjj, fj; 
     double weight, pj, pjj, dp, nx, ny, rho, u, v, p, ho, uprime, a, lp, lm, l, lt, lc;  
     double g = 5.72, pe = perfgam - 1; 
+    // cout << "J FLUXES: " << endl; 
 
     for (int i = 0; i < Nx_local; ++i) {
         for (int j = 0; j < Ny + 1; ++j) { 
-
             
             cj = (i + 1) * (Ny + 2) + j;
             cjj = (i + 1) * (Ny + 2) + j + 1; 
@@ -1261,8 +1263,12 @@ void Solver2D::compute_jfluxes() {
 
             matvec_mult(&jMinus_A[fj * n * n], &U[cjj * n], F_minus.data(), n);  
 
-            for (int k = 0; k < n; ++k) 
+            // cout << i << ", " << j << ": ";
+            for (int k = 0; k < n; ++k) {
                 jFlux[fj * n + k] = F_plus[k] + F_minus[k];  
+                // cout << jFlux[fj * n + k] << " ";
+            }
+            // cout << "\t nx = " << nx << " ny = " << ny << endl; 
         }
     }
 }
@@ -1298,9 +1304,7 @@ void Solver2D::relax_left_line() {
                 - iMinus_A[RF * n * n + k] * iArea[RF] * dU_old[((i + 2) * (Ny + 2) + j + 1) * n + k];
         
         alpha = A;
-
         matrix_divide(alpha.data(), F.data(), &v[j * n], n, 1);  //n = rows of x, m = columns of x
-
         matrix_divide(alpha.data(), C.data(), &g[j * n * n], n, n); 
 
         // ======================= Inner cells ======================== //
@@ -1651,7 +1655,7 @@ void Solver2D::update_U() {
 
     for (int i = 1; i < Nx_local + 1; ++i) {
         for (int j = 1; j < Ny + 1; ++j) {
-            int idx = (i + (Ny + 2) + j) * n;
+            int idx = (i * (Ny + 2) + j) * n;
             for (int k = 0; k < n; ++k) {
                 U[idx + k] += dU_old[idx + k];
             }
@@ -1699,8 +1703,8 @@ void Solver2D::compute_inner_res() {
     double inner_res_local = 0.0;
     double F, res = 0.0;
 
-    for (int i = 1; i < Nx_local + 1; ++i) {
-        for (int j = 1; j < Ny + 1; ++j) {
+    for (int i = 2; i < Nx_local; ++i) {
+        for (int j = 2; j < Ny; ++j) {
 
             int LF = (i * Ny + j), RF = ((i + 1) * Ny + j), 
             BF = (i * (Ny + 1) + j), TF = (i * (Ny + 1) + j + 1),
@@ -1760,7 +1764,29 @@ void Solver2D::compute_outer_res() {
     MPI_Allreduce(&outer_res_local, &outer_res, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
     outer_res = sqrt(outer_res); 
 }
+void Solver2D::explicit_update() {
 
+    // cout << endl << "dU_old: " << endl;
+    for (int i = 0; i < Nx_local; ++i) {
+        for (int j = 0; j < Ny; ++j) {
+
+            int LF = (i * Ny + j), RF = ((i + 1) * Ny + j), 
+                BF = (i * (Ny + 1) + j), TF = (i * (Ny + 1) + j + 1),
+                CC = i * Ny + j;
+
+                // cout << i + 1 << ", " << j + 1 << ": ";
+                for (int k = 0; k < n; ++k) {
+                    dU_old[((i + 1) * (Ny + 2) + j + 1) * n + k] = - dt / Volume[CC] * (- iFlux[LF * n + k] * iArea[LF]
+                                                                 + iFlux[RF * n + k] * iArea[RF]
+                                                                 - jFlux[BF * n + k] * jArea[BF]
+                                                                 + jFlux[TF * n + k] * jArea[TF] );
+
+                    // cout << dU_old[((i + 1) * (Ny + 2) + j + 1) * n + k] << " ";
+                }
+            // cout << endl;
+        }
+    }
+}
 
 void Solver2D::writeTecplotDat(const string& filename) 
 
@@ -1791,7 +1817,7 @@ void Solver2D::writeTecplotDat(const string& filename)
     for (int i = 0; i < Nx; ++i) {  
         for (int j = 0; j < Ny; ++j) {
             int idx = i * Ny + j;
-            constoprim(&U[idx * n], V.data(), n_vel);
+            constoprim(&U_gathered[idx * n], V.data(), n_vel);
             file << V[0] << " " << "\n";
         }
     }
@@ -1800,7 +1826,7 @@ void Solver2D::writeTecplotDat(const string& filename)
     for (int i = 0; i < Nx; ++i) {  
         for (int j = 0; j < Ny; ++j) {
             int idx = i * Ny + j;
-            constoprim(&U[idx * n], V.data(), n_vel);
+            constoprim(&U_gathered[idx * n], V.data(), n_vel);
             file << V[1] << " " << "\n";
         }
     }
@@ -1808,7 +1834,7 @@ void Solver2D::writeTecplotDat(const string& filename)
     for (int i = 0; i < Nx; ++i) {  
         for (int j = 0; j < Ny; ++j) {
             int idx = i * Ny + j;
-            constoprim(&U[idx * n], V.data(), n_vel);
+            constoprim(&U_gathered[idx * n], V.data(), n_vel);
             file << V[2] << " " << "\n";
         }
     }
@@ -1816,12 +1842,12 @@ void Solver2D::writeTecplotDat(const string& filename)
     for (int i = 0; i < Nx; ++i) {  
         for (int j = 0; j < Ny; ++j) {
             int idx = i * Ny + j;
-            constoprim(&U[idx * n], V.data(), n_vel);
+            constoprim(&U_gathered[idx * n], V.data(), n_vel);
             file << V[3] << " " << "\n";
         }
     }
 
-    cout << "File created!" << endl;
+    if (rank == 0) cout << "File created: " << filename << endl;
 
     file.close();
 }

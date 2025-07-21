@@ -100,3 +100,13 @@ void matrix_divide(double* A, const double* B, double* X, int n, int m) {
         }
     }
 }
+
+void print_matrix(const double* M, int rows, int cols) {
+    std::cout << std::fixed << std::setprecision(4);
+    for (int i = 0; i < rows; ++i) {
+        for (int j = 0; j < cols; ++j) {
+            std::cout << std::setw(10) << M[i * cols + j] << " ";
+        }
+        std::cout << "\n";
+    }
+}

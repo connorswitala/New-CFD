@@ -5,6 +5,7 @@
 #include <cassert>
 #include <stdexcept>
 #include <cmath> 
+#include <iomanip>
 
 using namespace std;
 constexpr double pi = 3.141592653;
@@ -30,3 +31,4 @@ void matmat_add(const double* mat1, const double* mat2, double* res, int n);
 void matmat_sub(const double* mat1, const double* mat2, double* res, int n);
 void matrix_divide(double* A, const double* B, double* X, int n, int m);
 void matmat_mult(const double* mat1, const double* mat2, double* res, int n); 
+void print_matrix(const double* M, int rows, int cols);

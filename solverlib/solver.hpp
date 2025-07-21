@@ -100,7 +100,8 @@ private:
     int n_vel = 2;
     int n = 4;
 
-    int Nx, Ny, Nx_local, N_cells, N_local;
+    int Nx_local; 
+    int Nx, Ny, N_cells, N_local;
     int num_cells, num_ifaces, num_jfaces, num_loc_cells, num_gathered_cells; 
     double CFL, dt, t, outer_res, inner_res;
     string save_filename;
@@ -151,6 +152,7 @@ public:
     void relax_inner_lines();
     void relax_right_line(); 
     void update_U();
+    void explicit_update();
 
     void create_ramp_grid(double L, double inlet_height, double ramp_angle);
 
