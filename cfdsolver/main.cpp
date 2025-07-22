@@ -3,7 +3,7 @@
 
 int main(int argc, char* argv[]) {
 
-    int Nx = 400, Ny = 200;
+    int Nx = 100, Ny = 50;
     double CFL = 0.5; 
 
 

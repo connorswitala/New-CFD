@@ -1,25 +1,57 @@
 Starting solve!
-Iteration: 100	Residual: 8.715e+05	dt: 2.83278e-07
-Iteration: 200	Residual: 1.811e+06	dt: 2.79463e-07
-Iteration: 300	Residual: 2.766e+06	dt: 2.78195e-07
-Iteration: 400	Residual: 3.722e+06	dt: 2.77561e-07
-Iteration: 500	Residual: 4.677e+06	dt: 2.77182e-07
-Iteration: 600	Residual: 5.633e+06	dt: 2.76929e-07
-Iteration: 700	Residual: 6.588e+06	dt: 2.76748e-07
-Iteration: 800	Residual: 7.544e+06	dt: 2.76613e-07
-Iteration: 900	Residual: 8.500e+06	dt: 2.76507e-07
-Iteration: 1000	Residual: 9.455e+06	dt: 2.76423e-07
-Iteration: 1100	Residual: 1.041e+07	dt: 2.76354e-07
-Iteration: 1200	Residual: 1.137e+07	dt: 2.76297e-07
-Iteration: 1300	Residual: 1.232e+07	dt: 2.76248e-07
-Iteration: 1400	Residual: 1.328e+07	dt: 2.76207e-07
-Iteration: 1500	Residual: 1.423e+07	dt: 2.76171e-07
-Iteration: 1600	Residual: 1.519e+07	dt: 2.76139e-07
-Iteration: 1700	Residual: 1.614e+07	dt: 2.76111e-07
-Iteration: 1800	Residual: 1.710e+07	dt: 2.76086e-07
-Iteration: 1900	Residual: 1.806e+07	dt: 2.76064e-07
-Iteration: 2000	Residual: 1.901e+07	dt: 2.76044e-07
-Iteration: 2100	Residual: 1.997e+07	dt: 2.76026e-07
-Iteration: 2200	Residual: 2.092e+07	dt: 2.76010e-07
-Iteration: 2300	Residual: 2.188e+07	dt: 2.75995e-07
-Iteration: 2400	Residual: 2.283e+07	dt: 2.75981e-07
+Iteration: 100	Residual: 1.028e+05	dt: 1.21483e-06
+Iteration: 200	Residual: 2.110e+05	dt: 1.19938e-06
+Iteration: 300	Residual: 3.192e+05	dt: 1.19421e-06
+Iteration: 400	Residual: 4.275e+05	dt: 1.19163e-06
+Iteration: 500	Residual: 5.358e+05	dt: 1.19008e-06
+Iteration: 600	Residual: 6.441e+05	dt: 1.18905e-06
+Iteration: 700	Residual: 7.524e+05	dt: 1.18831e-06
+Iteration: 800	Residual: 8.607e+05	dt: 1.18775e-06
+Iteration: 900	Residual: 9.689e+05	dt: 1.18732e-06
+Iteration: 1000	Residual: 1.077e+06	dt: 1.18698e-06
+Iteration: 1100	Residual: 1.186e+06	dt: 1.18669e-06
+Iteration: 1200	Residual: 1.294e+06	dt: 1.18646e-06
+Iteration: 1300	Residual: 1.402e+06	dt: 1.18626e-06
+Iteration: 1400	Residual: 1.510e+06	dt: 1.18609e-06
+Iteration: 1500	Residual: 1.619e+06	dt: 1.18594e-06
+Iteration: 1600	Residual: 1.727e+06	dt: 1.18581e-06
+Iteration: 1700	Residual: 1.835e+06	dt: 1.18570e-06
+Iteration: 1800	Residual: 1.943e+06	dt: 1.18560e-06
+Iteration: 1900	Residual: 2.051e+06	dt: 1.18551e-06
+Iteration: 2000	Residual: 2.160e+06	dt: 1.18542e-06
+Iteration: 2100	Residual: 2.268e+06	dt: 1.18535e-06
+Iteration: 2200	Residual: 2.376e+06	dt: 1.18528e-06
+Iteration: 2300	Residual: 2.484e+06	dt: 1.18522e-06
+Iteration: 2400	Residual: 2.592e+06	dt: 1.18517e-06
+Iteration: 2500	Residual: 2.700e+06	dt: 1.18511e-06
+Iteration: 2600	Residual: 2.809e+06	dt: 1.18507e-06
+Iteration: 2700	Residual: 2.917e+06	dt: 1.18502e-06
+Iteration: 2800	Residual: 3.025e+06	dt: 1.18498e-06
+Iteration: 2900	Residual: 3.133e+06	dt: 1.18494e-06
+Iteration: 3000	Residual: 3.241e+06	dt: 1.18491e-06
+Iteration: 3100	Residual: 3.349e+06	dt: 1.18487e-06
+Iteration: 3200	Residual: 3.457e+06	dt: 1.18484e-06
+Iteration: 3300	Residual: 3.565e+06	dt: 1.18481e-06
+Iteration: 3400	Residual: 3.674e+06	dt: 1.18478e-06
+Iteration: 3500	Residual: 3.782e+06	dt: 1.18476e-06
+Iteration: 3600	Residual: 3.890e+06	dt: 1.18473e-06
+Iteration: 3700	Residual: 3.998e+06	dt: 1.18471e-06
+Iteration: 3800	Residual: 4.106e+06	dt: 1.18469e-06
+Iteration: 3900	Residual: 4.214e+06	dt: 1.18467e-06
+Iteration: 4000	Residual: 4.322e+06	dt: 1.18465e-06
+Iteration: 4100	Residual: 4.431e+06	dt: 1.18463e-06
+Iteration: 4200	Residual: 4.539e+06	dt: 1.18461e-06
+Iteration: 4300	Residual: 4.647e+06	dt: 1.18459e-06
+Iteration: 4400	Residual: 4.755e+06	dt: 1.18458e-06
+
+job aborted:
+[ranks] message
+
+[0] job terminated by the user
+
+---- error analysis -----
+
+[0] on DESKTOP
+ctrl-c was hit. job aborted by the user.
+
+---- error analysis -----

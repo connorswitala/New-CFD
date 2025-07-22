@@ -122,7 +122,7 @@ private:
 		iAreas,	jAreas,
 		cellVolumes;
 
-    Vector A, B, C, F, v, g, alpha, result_vector1, result_vector2, result_matrix, I; 
+    Vector A, B, C, F, v, g, alpha, rv1, rv2, rm1, rm2, I; 
     
     BCMap BCs; 
 
@@ -153,6 +153,7 @@ public:
     void relax_right_line(); 
     void update_U();
     void explicit_update();
+    void finalize(); 
 
     void print_by_rank(Vector Vec, int nx, int ny, int nvars, string name); 
     void create_ramp_grid(double L, double inlet_height, double ramp_angle);
