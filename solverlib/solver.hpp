@@ -149,7 +149,7 @@ public:
     void compute_jfluxes(); 
     void compute_rho_fluxes(); 
     void relax_left_line();
-    void relax_inner_lines();
+    void relax_inner_lines(int i);
     void relax_right_line(); 
     void update_U();
     void explicit_update();

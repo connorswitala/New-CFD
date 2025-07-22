@@ -3,8 +3,8 @@
 
 int main(int argc, char* argv[]) {
 
-    int Nx = 100, Ny = 50;
-    double CFL = 0.5; 
+    int Nx = 400, Ny = 200;
+    double CFL = 2.0; 
 
 
     Vector V_inlet = {0.01, 4000, 0.0, 10000};
