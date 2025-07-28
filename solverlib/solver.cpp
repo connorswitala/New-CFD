@@ -31,6 +31,35 @@ void constoprim(const double* U, double* V, const double gam, const int dimensio
     V[dimensions + 1] = (U[dimensions + 1] - 0.5 / U[0] * udotu) * (gam - 1); // Set pressure
 }
 
+ThermoEntry operator+(const ThermoEntry& A, const ThermoEntry& B) {
+	ThermoEntry result;
+	result.rho = A.rho + B.rho;
+	result.e = A.e + B.e;
+	result.p = A.p + B.p;
+	result.T = A.T + B.T;
+	result.R = A.R + B.R;
+	result.cv = A.cv + B.cv;
+	result.gamma = A.gamma + B.gamma;
+	result.dpdrho = A.dpdrho + B.dpdrho;
+	result.dpde = A.dpde + B.dpde;
+    result.a = A.a + B.a;
+	return result;
+}
+ThermoEntry operator*(const double& s, const ThermoEntry& A) {
+	ThermoEntry result;
+	result.rho = s * A.rho;
+	result.e = s * A.e;
+	result.p = s * A.p;
+	result.T = s * A.T;
+	result.R = s * A.R;
+	result.cv = s * A.cv;
+	result.gamma = s * A.gamma;
+	result.dpdrho = s * A.dpdrho;
+	result.dpde = s * A.dpde;
+    result.a = s * A.a;
+	return result;
+}
+
 
 /////////////////////////////////////////////////
 //////// Sod Shock Tube Solver Functions ////////
@@ -58,8 +87,8 @@ SodSolver1D::SodSolver1D(int Nx, double CFL) : Nx(Nx), CFL(CFL) {
         
         Vector VL = {1.0, 0.0, 1.0};
         Vector VR = {0.125, 0.0, 0.1};
-        primtocons(UL.data(), VL.data(), n_vel);
-        primtocons(UR.data(), VR.data(), n_vel);
+        primtocons(UL.data(), VL.data(), perfgam, n_vel);
+        primtocons(UR.data(), VR.data(), perfgam, n_vel);
 
         for (int i = 0; i < Nx + 2; ++i) {
             for (int k = 0; k < n; ++k) {
@@ -163,7 +192,7 @@ void SodSolver1D::write_U_to_csv(string filename) {
 
     for (int i = 0; i < Nx + 2; ++i) {
         int idx = i * 3;
-        constoprim(&U_gathered[idx], V.data(), n_vel);
+        constoprim(&U_gathered[idx], V.data(), perfgam, n_vel);
         file << V[0] << ',' << V[1] << ',' << V[2] << '\n';
     }
 
@@ -177,7 +206,7 @@ void SodSolver1D::compute_fluxes() {
             int aidx = i * n * n;
 
             // Positive flux calculation
-            constoprim(&U[idx], V.data(), n_vel);
+            constoprim(&U[idx], V.data(), perfgam, n_vel);
             double rho = V[0];
             double u = V[1];
             double p = V[2];
@@ -192,9 +221,9 @@ void SodSolver1D::compute_fluxes() {
             fill(int1.begin(), int1.end(), 0.0);
             for (int k = 0; k < n; ++k) int1[k * n + k] = l;
 
-            V1 = {lc / (a * a), (u * lc + a * lt) / (a * a), ((U[idx + 2] + computePressure(&U[idx], n_vel)) / U[idx] * lc + a * u * lt) / (a * a)};
+            V1 = {lc / (a * a), (u * lc + a * lt) / (a * a), ((U[idx + 2] + computePressure(&U[idx], perfgam, n_vel)) / U[idx] * lc + a * u * lt) / (a * a)};
             Q = {0.5 * u * u * (perfgam - 1), -u * (perfgam - 1), (perfgam - 1)};
-            V2 = {lt / a, u * lt / a + lc, (U[idx + 2] + computePressure(&U[idx], n_vel)) / U[idx] * lt / a + u * lc};
+            V2 = {lt / a, u * lt / a + lc, (U[idx + 2] + computePressure(&U[idx], perfgam,  n_vel)) / U[idx] * lt / a + u * lc};
             W = {-u, 1, 0};
 
             outer_product(V1.data(), Q.data(), int2.data(), n);
@@ -206,7 +235,7 @@ void SodSolver1D::compute_fluxes() {
             matvec_mult(&A_plus[aidx], &U[idx], &F_plus[idx], n);
 
             // Negative flux calculation
-            constoprim(&U[iidx], V.data(), n_vel);
+            constoprim(&U[iidx], V.data(), perfgam, n_vel);
             rho = V[0]; 
             u = V[1]; 
             p = V[2];
@@ -221,9 +250,9 @@ void SodSolver1D::compute_fluxes() {
             fill(int1.begin(), int1.end(), 0.0);
             for (int k = 0; k < n; ++k) int1[k * n + k] = l;
 
-            V1 = {lc / (a * a), (u * lc + a * lt) / (a * a), ((U[iidx + 2] + computePressure(&U[iidx], n_vel)) / U[iidx] * lc + a * u * lt) / (a * a)};
+            V1 = {lc / (a * a), (u * lc + a * lt) / (a * a), ((U[iidx + 2] + computePressure(&U[iidx], perfgam, n_vel)) / U[iidx] * lc + a * u * lt) / (a * a)};
             Q = {0.5 * u * u * (perfgam - 1), -u * (perfgam - 1), (perfgam - 1)};
-            V2 = {lt / a, u * lt / a + lc, (U[iidx + 2] + computePressure(&U[iidx], n_vel)) / U[iidx] * lt / a + u * lc};
+            V2 = {lt / a, u * lt / a + lc, (U[iidx + 2] + computePressure(&U[iidx], perfgam, n_vel)) / U[iidx] * lt / a + u * lc};
             W = {-u, 1, 0};
 
             outer_product(V1.data(), Q.data(), int2.data(), n);
@@ -293,8 +322,8 @@ void SodSolver1D::solve() {
 //////// Solver2D Functions ////////
 ////////////////////////////////////
 
-Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, bool real_gas, bool using_table) : 
-    Nx(Nx), Ny(Ny), CFL(CFL), U_inlet(U_inlet), real_gas(real_gas), using_table(using_table),
+Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, bool real_gas, bool using_table, string filename) : 
+    Nx(Nx), Ny(Ny), CFL(CFL), U_inlet(U_inlet), real_gas(real_gas), using_table(using_table), filename(filename),
     BCs(BCType::Inlet, BCType::Outlet, BCType::Symmetry, BCType::Symmetry) {
     
 
@@ -359,6 +388,7 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, bool real_gas, bo
     g = Vector(Ny * n * n, 0.0); 
 
     // Intermediate vectors and matrices;
+    rm0 = Vector(n * n, 0.0); 
     rm1 = Vector(n * n, 0.0);
     rm2 = Vector(n * n, 0.0);
     rv1 = Vector(n, 0.0);
@@ -399,8 +429,6 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, bool real_gas, bo
      */
 
     cell_thermo = vector<ThermoEntry>((Nx_local * 2) * (Ny + 2));
-    rho_inlet = U_inlet[0];
-    e_inlet = computeInternalEnergy(U_inlet.data(), n_vel); 
 
     // This checks to see if you are solving a perfect gas EOS, or using Gibbs minimization.
     if (real_gas) {
@@ -418,12 +446,16 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, bool real_gas, bo
             thermochemical_table = vector<ThermoEntry>(500 * 500); 
             load_thermochemical_table(); 
         }
-        else if (!using_table) {
+        else if (using_table == false) {
             Chemistry chem;
         }
     }
 
     initialize_chemistry();
+
+    if (rank == 0)
+        cout << "Chemistry initialized" << endl;
+
     form_inviscid_boundary_E();   
 }
 
@@ -748,62 +780,6 @@ void Solver2D::exchange_dU_ghost_cells() {
     }
 
 }
-void Solver2D::exchange_cell_thermo_ghost_cells() {
-     MPI_Status status_left, status_right;
-
-    int col_size = (Ny + 2) * n; // Exchange all variables for entire column of Ny cells. 
-
-    Vector send_leftdU(col_size), recv_leftdU(col_size);
-    Vector send_rightdU(col_size), recv_rightdU(col_size);
-
-     for (int j = 0; j < Ny + 2; ++j) {
-        for (int k = 0; k < n; ++k) {
-
-            int local_left = (1 * (Ny + 2) + j) * n + k;
-            int local_right = (Nx_local * (Ny + 2) + j ) * n + k;
-
-            send_leftdU[j * n + k] = dU_old[local_left];
-            send_rightdU[j * n + k] = dU_old[local_right];
-        }
-    }
-
-
-    if (rank > 0) {
-        MPI_Sendrecv(send_leftdU.data(), col_size, MPI_DOUBLE, rank - 1, 0,
-                     recv_leftdU.data(), col_size, MPI_DOUBLE, rank - 1, 1,
-                     MPI_COMM_WORLD, &status_left);
-    }
-
-    if (rank < size - 1) {
-        MPI_Sendrecv(send_rightdU.data(), col_size, MPI_DOUBLE, rank + 1, 1,
-                     recv_rightdU.data(), col_size, MPI_DOUBLE, rank + 1, 0,
-                     MPI_COMM_WORLD, &status_right); 
-    }
-
-
-    /** This nested for loop takes the send and receive buffs and puts the data
-     * from it into the ghost cell spots for each rank. 
-     */
-
-    for (int j = 0; j < Ny + 2; ++j) {
-        for (int k = 0; k < n; ++k) {
-
-            if (rank > 0) {
-                int ghost_left =  j * n + k;
-                dU_old[ghost_left] = recv_leftdU[j * n + k];
-            }
-
-            if (rank < size - 1) {
-                int ghost_right = ((Nx_local + 1) * (Ny + 2) + j) * n + k;
-                dU_old[ghost_right] = recv_rightdU[j * n + k];
-            }
-
-        }
-    }
-
-}
-
-
 
 void Solver2D::solve() {
 
@@ -812,60 +788,70 @@ void Solver2D::solve() {
     if (rank == 0) cout << "Starting solve!" << endl;
     int counter = 0;    
 
-    while (outer_res > 1e-6) {
+    while (counter < 2) {
 
-        inner_res = 1.0;
-        int in_counter = 0;  
         exchange_U_ghost_cells(); 
+
+        if (rank == 0) 
+            cout << "Ghost cells exchanged" << endl;
+
+        print_by_rank(U, Nx_local + 2, Ny + 2, n, "U: ");
+
+        if (real_gas) {
+            get_real_chemistry();
+        }
+        else {
+            get_perf_chemistry();
+        }
+
+        if (rank == 0)
+            cout << "Chemistry solved" << endl;
 
         compute_dt();
 
+        if (rank == 0)
+            cout << "dt calculated" << endl;
+
         compute_ifluxes();
+
+        if (rank == 0)
+            cout << "i-fluxes calculated" << endl;
+
         compute_jfluxes();
 
-        while (in_counter < 8) {
+        if (rank == 0)
+            cout << "j-fluxes calculated" << endl;
 
-            // LEFT-LINE RELAX
-            relax_left_line();
-            // if (rank == 0) cout << "-> left-line relaxed. \n\n";         
-            
-            // INNER-LINES RELAX
-            if (rank > 0 && rank < size - 1) {
-                for (int i = 0; i < Nx_local; ++i) {
-                    relax_inner_lines(i);
-                }
-            }
-            // if (rank == 0) cout << "-> middle lines relaxed. \n\n";
+        print_by_rank(irho_flux, Nx_local + 1, Ny, n, "iRho_flux: ");
 
-            // RIGHT LINE RELAX
-            relax_right_line(); 
-            // if (rank == 0) cout << "-> right line relaxed. \n\n";
-
-            for (int i = 0; i < Nx_local + 2; ++i) {
-                for (int j = 0; j < Ny + 2; ++j) {
-                    int idx = (i * (Ny + 2) + j) * n;
-                    for (int k = 0; k < n; ++k) {
-                        dU_old[idx + k] = dU_new[idx + k];
-                    }
-                }
-            }
-
-            exchange_dU_ghost_cells(); 
-
-            compute_inner_res();
-
-            in_counter++;
-
+        if (real_gas) {
+            real_line_relaxation(); 
         }
-       
-        // explicit_update(); 
+        else {
+            perf_line_relaxation();
+        }
+
+        if (rank == 0)
+            cout << "lines relaxed" << endl;
 
         update_U(); 
 
-        compute_outer_res(); 
+        if (rank == 0)
+            cout << "u-updated" << endl;
+
+        if (real_gas) {
+            compute_outer_res_real(); 
+        }
+        else {
+            compute_outer_res_perf();
+        }
+
+        if (rank == 0)
+            cout << "outer residual calculated" << endl;
 
         counter++;
-
+        if (rank == 0) 
+            cout << "Counter: " << counter << endl;
         if (counter % 100 == 0) {
             double end_time = MPI_Wtime();
             if (rank == 0) cout << "Iteration: " << counter
@@ -873,12 +859,10 @@ void Solver2D::solve() {
                 << "\t Outer residual: " << fixed << scientific << setprecision(4) << outer_res
                 << "\tdt: " << fixed << scientific << setprecision(5) << dt 
                 << "\tElapsed time: " << end_time - start_time << " seconds." << endl;
-        }
-        
+        }        
         
         if (counter % 1000 == 0) {
-            string filename = "DPLR TEST.dat";
-            writeTecplotDat(filename);
+            writeTecplotDat();
         }
     }
 
@@ -1187,19 +1171,18 @@ void Solver2D::compute_ifluxes() {
             }
 
             // Compute i_rhoA 
-            if (real_gas) {
+        
+            up_half = (0.5 * Ui[1] / Ui[0] + 0.5 * Uii[1] / Uii[0]) * nx + (0.5 * Ui[2] / Ui[0] + 0.5 * Uii[2] / Uii[0]) * ny;
+            p_half = 0.5 * (pi + pii); 
+            rho_half = 0.5 * (Ui[0] + Uii[0]);
+            dpdrho_half = 0.5 * (CTi.dpdrho + CTii.dpdrho);
+            
+            irho_A[fi * n * n + 4] = (dpdrho_half - p_half / rho_half) * nx;
+            irho_A[fi * n * n + 8] = (dpdrho_half - p_half / rho_half) * ny;
+            irho_A[fi * n * n + 12] = (dpdrho_half - p_half / rho_half) * up_half;
 
-                up_half = (0.5 * Ui[1] / Ui[0] + 0.5 * Uii[1] / Uii[0]) * nx + (0.5 * Ui[2] / Ui[0] + 0.5 * Uii[2] / Uii[0]) * ny;
-                p_half = 0.5 * (pi + pii); 
-                rho_half = 0.5 * (Ui[0] + Uii[0]);
-                dpdrho_half = 0.5 * (CTi.dpdrho + CTii.dpdrho);
-                
-                irho_A[fi * n * n + 4] = (dpdrho_half - p_half / rho_half) * nx;
-                irho_A[fi * n * n + 8] = (dpdrho_half - p_half / rho_half) * ny;
-                irho_A[fi * n * n + 12] = (dpdrho_half - p_half / rho_half) * up_half;
-
-                matvec_mult(&irho_A[fi * n * n], U_half.data(), &irho_flux[fi * n], n);
-            }
+            matvec_mult(&irho_A[fi * n * n], U_half.data(), &irho_flux[fi * n], n);
+        
 
             // Positive flux calculation
 
@@ -1235,7 +1218,7 @@ void Solver2D::compute_ifluxes() {
             for (int k = 0; k < n * n; ++k) 
                 iPlus_A[fi * n * n + k]  = int1[k] + int2[k] + int3[k];
 
-            matvec_mult(&iPlus_A[fi * n * n], &U[ci * n], F_plus.data(), n);  
+            matvec_mult(&iPlus_A[fi * n * n], Ui.data(), F_plus.data(), n);  
 
              // Negative flux calculation
 
@@ -1271,7 +1254,7 @@ void Solver2D::compute_ifluxes() {
             for (int k = 0; k < n * n; ++k) 
                 iMinus_A[fi * n * n + k]  = int1[k] + int2[k] + int3[k]; 
 
-            matvec_mult(&iMinus_A[fi * n * n], &U[cii * n], F_minus.data(), n);  
+            matvec_mult(&iMinus_A[fi * n * n], Uii.data(), F_minus.data(), n);  
 
             // cout << i << ", " << j << ": ";
             for (int k = 0; k < n; ++k) {
@@ -1377,7 +1360,7 @@ void Solver2D::compute_jfluxes() {
             for (int k = 0; k < n * n; ++k) 
                 jPlus_A[fj * n * n + k]  = int1[k] + int2[k] + int3[k];
 
-            matvec_mult(&jPlus_A[fj * n * n], &U[cj * n], F_plus.data(), n);  
+            matvec_mult(&jPlus_A[fj * n * n], Uj.data(), F_plus.data(), n);  
 
              // Negative flux calculation
 
@@ -1413,7 +1396,7 @@ void Solver2D::compute_jfluxes() {
             for (int k = 0; k < n * n; ++k) 
                 jMinus_A[fj * n * n + k]  = int1[k] + int2[k] + int3[k]; 
 
-            matvec_mult(&jMinus_A[fj * n * n], &U[cjj * n], F_minus.data(), n);  
+            matvec_mult(&jMinus_A[fj * n * n], Ujj.data(), F_minus.data(), n);  
 
             // cout << i << ", " << j << ": ";
             for (int k = 0; k < n; ++k) {
@@ -1425,7 +1408,39 @@ void Solver2D::compute_jfluxes() {
     }
 }
 
-void Solver2D::relax_left_line() {
+void Solver2D::perf_line_relaxation() {
+    int in_counter = 0;
+
+    while (in_counter < 8) {
+
+        relax_left_line_perf();  
+        
+        if (rank > 0 && rank < size - 1) {
+            for (int i = 0; i < Nx_local; ++i) {
+                relax_inner_lines_perf(i);
+            }
+        }
+
+        relax_right_line_perf();
+
+        for (int i = 0; i < Nx_local + 2; ++i) {
+            for (int j = 0; j < Ny + 2; ++j) {
+                int idx = (i * (Ny + 2) + j) * n;
+                for (int k = 0; k < n; ++k) {
+                    dU_old[idx + k] = dU_new[idx + k];
+                }
+            }
+        }
+
+        exchange_dU_ghost_cells(); 
+
+        compute_inner_res_perf();
+
+        in_counter++;
+
+    }
+}
+void Solver2D::relax_left_line_perf() {
 
     if (rank == 0) {
 
@@ -1561,11 +1576,11 @@ void Solver2D::relax_left_line() {
 
 
         for (int i = 1; i < Nx_local - 1; ++i) {
-            relax_inner_lines(i); 
+            relax_inner_lines_perf(i); 
         }
     }
 }
-void Solver2D::relax_inner_lines(int i) { 
+void Solver2D::relax_inner_lines_perf(int i) { 
 
     // ====================== Top cell ====================== // 
     int j = Ny - 1;
@@ -1697,13 +1712,13 @@ void Solver2D::relax_inner_lines(int i) {
             dU_new[((i + 1) * (Ny + 2) + j + 1) * n + k] = v[j * n + k] - rv1[k];
     }
 }
-void Solver2D::relax_right_line() {
+void Solver2D::relax_right_line_perf() {
 
 
     if (rank == size - 1) {
 
         for (int i = 0; i < Nx_local - 1; ++i) {
-            relax_inner_lines(i); 
+            relax_inner_lines_perf(i); 
         }
 
         // ====================== Top cell ====================== // 
@@ -1838,6 +1853,561 @@ void Solver2D::relax_right_line() {
     }
 }
 
+void Solver2D::real_line_relaxation() {
+    int in_counter = 0;
+
+    while (in_counter < 8) {
+
+        relax_left_line_real();  
+        
+        if (rank > 0 && rank < size - 1) {
+            for (int i = 0; i < Nx_local; ++i) {
+                relax_inner_lines_real(i);
+            }
+        }
+
+        relax_right_line_real();
+
+        for (int i = 0; i < Nx_local + 2; ++i) {
+            for (int j = 0; j < Ny + 2; ++j) {
+                int idx = (i * (Ny + 2) + j) * n;
+                for (int k = 0; k < n; ++k) {
+                    dU_old[idx + k] = dU_new[idx + k];
+                }
+            }
+        }
+
+        exchange_dU_ghost_cells(); 
+        compute_inner_res_real();
+        in_counter++;
+
+    }
+}
+void Solver2D::relax_left_line_real() {
+
+    if (rank == 0) {
+
+        // ====================== Top cell ====================== // 
+        int i = 0, j = Ny - 1;
+        int LF = (i * Ny + j), RF = ((i + 1) * Ny + j), 
+            BF = (i * (Ny + 1) + j), TF = (i * (Ny + 1) + j + 1),
+            CC = i * Ny + j;
+         
+        // Left face
+        for (int k = 0; k < n * n; ++ k) 
+            rm0[k] = iPlus_A[LF * n * n + k] - 0.5 * irho_A[LF * n * n + k];        
+
+        matmat_mult(&iEL[j * n * n], rm0.data(), rm1.data(), n);
+
+        // Top face
+        for (int k = 0; k < n * n; ++k) 
+            rm0[k] = jMinus_A[TF * n * n + k] - 0.5 * jrho_A[TF * n * n + k];
+        
+        matmat_mult(&jET[i * n * n], rm0.data(), rm2.data(), n);
+
+        // Right face
+        for (int k = 0; k < n * n; ++k) 
+            rm0[k] = iMinus_A[RF * n * n + k] - 0.5 * irho_A[RF * n * n + k];
+
+        matvec_mult(rm0.data(), &dU_old[((i + 2) * (Ny + 2) + j + 1) * n], rv1.data(), n); 
+    
+        for (int k = 0; k < n * n; ++k) {
+            A[k] = 
+            Volume[CC] / dt * I[k]          // Time-derivative part
+            - (iMinus_A[LF * n * n + k] - 0.5 * irho_A[LF * n * n + k] + rm1[k] ) * iArea[LF] // Left-face contribution
+            + (iPlus_A[RF * n * n + k] - 0.5 * irho_A[RF * n * n + k] ) * iArea[RF]   // Right-face contribution
+            - (jMinus_A[BF * n * n + k] - 0.5 * jrho_A[BF * n * n + k] ) * jArea[BF]  // Bottom-face contribution
+            + (jPlus_A[TF * n * n + k] - 0.5 * jrho_A[TF * n * n + k] + rm2[k] ) * jArea[TF]; // Top-face contribution 
+
+
+            C[k] = -(jPlus_A[BF * n * n + k] - 0.5 * jrho_A[BF * n * n + k] ) * jArea[BF];
+        }
+
+        for (int k = 0; k < n; ++k) 
+            F[k] = (iFlux[LF * n + k] - irho_flux[LF * n + k] ) * iArea[LF]
+                - (iFlux[RF * n + k] - irho_flux[RF * n + k] ) * iArea[RF]
+                + (jFlux[BF * n + k] - jrho_flux[BF * n + k] ) * jArea[BF]
+                - (jFlux[TF * n + k] - jrho_flux[TF * n + k] ) * jArea[TF]
+                - rv1[k] * iArea[RF];
+        
+        alpha = A;
+        matrix_divide(alpha.data(), F.data(), &v[j * n], n, 1);  //n = rows of x, m = columns of x
+        matrix_divide(alpha.data(), C.data(), &g[j * n * n], n, n); 
+
+        // ======================= Inner cells ======================== //
+        for (int j = Ny - 2; j > 0; --j) {
+
+            LF = (i * Ny + j), RF = ((i + 1) * Ny + j), 
+            BF = (i * (Ny + 1) + j), TF = (i * (Ny + 1) + j + 1),
+            CC = i * Ny + j;
+
+            // Left face
+            for (int k = 0; k < n * n; ++ k) 
+                rm0[k] = iPlus_A[LF * n * n + k] - 0.5 * irho_A[LF * n * n + k];            
+
+            matmat_mult(&iEL[j * n * n], rm0.data(), rm1.data(), n);
+
+            // Right face
+            for (int k = 0; k < n * n; ++k) 
+                rm0[k] = iMinus_A[RF * n * n + k] - 0.5 * irho_A[RF * n * n + k];
+
+            matvec_mult(rm0.data(), &dU_old[((i + 2) * (Ny + 2) + j + 1) * n], rv1.data(), n); 
+
+            for (int k =  0; k < n * n; ++k) {
+                B[k] = (jMinus_A[TF * n * n + k] - 0.5 * jrho_A[TF * n * n + k] ) * jArea[TF]; 
+
+                A[k] = 
+                    Volume[CC] / dt * I[k]          // Time-derivative part
+                    - (iMinus_A[LF * n * n + k] - 0.5 * irho_A[LF * n * n + k] + rm1[k] ) * iArea[LF] // Left-face contribution
+                    + (iPlus_A[RF * n * n + k] - 0.5 * irho_A[RF * n * n + k] ) * iArea[RF]   // Right-face contribution
+                    - (jMinus_A[BF * n * n + k] - 0.5 * jrho_A[BF * n * n + k] ) * jArea[BF]  // Bottom-face contribution
+                    + (jPlus_A[TF * n * n + k] - 0.5 * jrho_A[TF * n * n + k] ) * jArea[TF]; // Top-face contribution
+
+                C[k] = -(jPlus_A[BF * n * n + k] - 0.5 * jrho_A[BF * n * n + k] ) * jArea[BF];
+            }
+
+            for (int k = 0; k < n; ++k) 
+                F[k] = (iFlux[LF * n + k] - irho_flux[LF * n + k] ) * iArea[LF]
+                    - (iFlux[RF * n + k]  - irho_flux[RF * n + k] ) * iArea[RF]
+                    + (jFlux[BF * n + k] - jrho_flux[BF * n + k] ) * jArea[BF]
+                    - (jFlux[TF * n + k] - jrho_flux[TF * n + k] ) * jArea[TF]
+                    - rv1[k] * iArea[RF];
+
+            // Form alpha
+            matmat_mult(B.data(), &g[(j + 1) * n * n], rm1.data(), n);
+            for (int k = 0; k < n * n; ++k) 
+                alpha[k] = A[k] - rm1[k];
+        
+            // Form g
+            matrix_divide(alpha.data(), C.data(), &g[j * n * n], n, n); 
+
+            // Form v
+            matvec_mult(B.data(), &v[(j + 1) * n], rv1.data(), n); 
+            for (int k = 0; k < n; ++k) 
+                rv2[k] = F[k] - rv1[k];        
+            matrix_divide(alpha.data(), rv2.data(), &v[j * n], n, 1);
+        }
+ 
+        // ==================== Bottom cell ===================== //
+        j = 0;
+
+        LF = (i * Ny + j), RF = ((i + 1) * Ny + j), 
+        BF = (i * (Ny + 1) + j), TF = (i * (Ny + 1) + j + 1),
+        CC = i * Ny + j;
+
+        // Left face
+        for (int k = 0; k < n * n; ++ k) 
+            rm0[k] = iPlus_A[LF * n * n + k] - 0.5 * irho_A[LF * n * n + k];            
+
+        matmat_mult(&iEL[j * n * n], rm0.data(), rm1.data(), n);
+
+        // Bottom face
+        for (int k = 0; k < n * n; ++ k) 
+            rm0[k] = jPlus_A[BF * n * n + k] - 0.5 * jrho_A[BF * n * n + k];            
+
+        matmat_mult(&jEB[i * n * n], rm0.data(), rm2.data(), n);
+
+        // Right face
+        for (int k = 0; k < n * n; ++k) 
+            rm0[k] = iMinus_A[RF * n * n + k] - 0.5 * irho_A[RF * n * n + k];
+
+        matvec_mult(rm0.data(), &dU_old[((i + 2) * (Ny + 2) + j + 1) * n], rv1.data(), n); 
+
+        for (int k = 0; k < n * n; ++k) {
+
+            B[k] = (jMinus_A[TF * n * n + k] - 0.5 * jrho_A[TF * n * n + k] ) * jArea[TF]; 
+
+            A[k] = 
+            Volume[CC] / dt * I[k]          // Time-derivative part
+            - (iMinus_A[LF * n * n + k] - 0.5 * irho_A[LF * n * n + k] + rm1[k] ) * iArea[LF] // Left-face contribution
+            + (iPlus_A[RF * n * n + k] - 0.5 * irho_A[RF * n * n + k] ) * iArea[RF]   // Right-face contribution
+            - (jMinus_A[BF * n * n + k] - 0.5 * jrho_A[BF * n * n + k] + rm2[k]) * jArea[BF]  // Bottom-face contribution
+            + (jPlus_A[TF * n * n + k] - 0.5 * jrho_A[TF * n * n + k] ) * jArea[TF]; // Top-face contribution
+        }
+
+        for (int k = 0; k < n; ++k) 
+            F[k] = (iFlux[LF * n + k] - irho_flux[LF * n + k] ) * iArea[LF]
+                - (iFlux[RF * n + k] - irho_flux[RF * n + k] ) * iArea[RF]
+                + (jFlux[BF * n + k] - jrho_flux[BF * n + k] ) * jArea[BF]
+                - (jFlux[TF * n + k] - jrho_flux[TF * n + k] ) * jArea[TF]
+                - rv1[k] * iArea[RF];
+        
+        // Form alpha
+        matmat_mult(B.data(), &g[(j + 1) * n * n], rm1.data(), n);
+        for (int k = 0; k < n * n; ++k) 
+            alpha[k] = A[k] - rm1[k];
+
+        // Form v
+        matvec_mult(B.data(), &v[(j + 1) * n], rv1.data(), n);
+        for (int k = 0; k < n; ++k) 
+            rv2[k] = F[k] - rv1[k];
+        matrix_divide(alpha.data(), rv2.data(), &v[j * n], n, 1); 
+
+        // ====================== Solve for dU_new ====================== //
+        for (int k = 0; k < n; ++k)
+            dU_new[((i + 1) * (Ny + 2) + j + 1) * n + k] = v[0 * n + k];
+
+        for (int j = 1; j < Ny; ++j) {
+            matvec_mult(&g[j * n * n], &dU_new[((i + 1) * (Ny + 2) + j) * n], rv1.data(), n);
+            for (int k = 0; k < n; ++k)
+                dU_new[((i + 1) * (Ny + 2) + j + 1) * n + k] = v[j * n + k] - rv1[k];
+            
+        }
+
+
+        for (int i = 1; i < Nx_local - 1; ++i) {
+            relax_inner_lines_real(i); 
+        }
+    }
+}
+void Solver2D::relax_inner_lines_real(int i) { 
+
+    // ====================== Top cell ====================== // 
+    int j = Ny - 1;
+    int LF = (i * Ny + j), RF = ((i + 1) * Ny + j), 
+        BF = (i * (Ny + 1) + j), TF = (i * (Ny + 1) + j + 1),
+        CC = i * Ny + j;
+    
+    // Top face
+    for (int k = 0; k < n * n; ++k) 
+        rm0[k] = jMinus_A[TF * n * n + k] - 0.5 * jrho_A[TF * n * n + k];
+
+    matmat_mult(&jET[i * n * n], rm0.data(), rm1.data(), n);
+
+    // Left face
+    for (int k = 0; k < n * n; ++k) 
+        rm0[k] = iPlus_A[LF * n * n + k] - 0.5 * irho_A[LF * n * n + k]; 
+
+    matvec_mult(rm0.data(), &dU_old[(i * (Ny + 2) + j + 1) * n], rv1.data(), n);
+
+    // Right face
+    for (int k = 0; k < n * n; ++k) 
+        rm0[k] = iMinus_A[RF * n * n + k] - 0.5 * irho_A[RF * n * n + k];  
+
+    matvec_mult(rm0.data(), &dU_old[((i + 2) * (Ny + 2) + j + 1) * n], rv2.data(), n); 
+
+    for (int k = 0; k < n * n; ++k) {
+        A[k] = 
+        Volume[CC] / dt * I[k]          // Time-derivative part
+        - (iMinus_A[LF * n * n + k] - 0.5 * irho_A[LF * n * n + k] ) * iArea[LF] // Left-face contribution
+        + (iPlus_A[RF * n * n + k] - 0.5 * irho_A[RF * n * n + k] ) * iArea[RF]   // Right-face contribution
+        - (jMinus_A[BF * n * n + k] - 0.5 * jrho_A[BF * n * n + k] ) * jArea[BF]  // Bottom-face contribution
+        + (jPlus_A[TF * n * n + k] - 0.5 * jrho_A[TF * n * n + k] + rm1[k]) * jArea[TF]; // Top-face contribution
+
+        C[k] = -(jPlus_A[BF * n * n + k] - 0.5 * jrho_A[BF * n * n + k] ) * jArea[BF];
+    }
+
+    for (int k = 0; k < n; ++k) 
+        F[k] = (iFlux[LF * n + k] - irho_flux[LF * n + k] ) * iArea[LF]
+            - (iFlux[RF * n + k] - irho_flux[RF * n + k] ) * iArea[RF]
+            + (jFlux[BF * n + k] - jrho_flux[BF * n + k] ) * jArea[BF]
+            - (jFlux[TF * n + k] - jrho_flux[TF * n + k] ) * jArea[TF]
+            + rv1[k] * iArea[LF]
+            - rv2[k] * iArea[RF];
+    
+    alpha = A;
+    matrix_divide(alpha.data(), F.data(), &v[j * n], n, 1);  //n = rows of x, m = columns of x
+    matrix_divide(alpha.data(), C.data(), &g[j * n * n], n, n); 
+
+    // ======================= Inner cells ======================== //
+    for (int j = Ny - 2; j > 0; --j) {
+
+        LF = (i * Ny + j), RF = ((i + 1) * Ny + j), 
+        BF = (i * (Ny + 1) + j), TF = (i * (Ny + 1) + j + 1),
+        CC = i * Ny + j;
+
+        // Left face
+        for (int k = 0; k < n * n; ++k) 
+            rm0[k] = iPlus_A[LF * n * n + k] - 0.5 * irho_A[LF * n * n + k]; 
+
+        matvec_mult(rm0.data(), &dU_old[(i * (Ny + 2) + j + 1) * n], rv1.data(), n);
+
+        // Right face
+        for (int k = 0; k < n * n; ++k) 
+            rm0[k] = iMinus_A[RF * n * n + k] - 0.5 * irho_A[RF * n * n + k]; 
+
+        matvec_mult(rm0.data(), &dU_old[((i + 2) * (Ny + 2) + j + 1) * n], rv2.data(), n); 
+
+        for (int k =  0; k < n * n; ++k) {
+            B[k] = (jMinus_A[TF * n * n + k] - 0.5 * jrho_A[TF * n * n + k] ) * jArea[TF]; 
+
+            A[k] = 
+                Volume[CC] / dt * I[k]          // Time-derivative part
+                - (iMinus_A[LF * n * n + k] - 0.5 * irho_A[LF * n * n + k] ) * iArea[LF] // Left-face contribution
+                + (iPlus_A[RF * n * n + k] - 0.5 * irho_A[RF * n * n + k] ) * iArea[RF]   // Right-face contribution
+                - (jMinus_A[BF * n * n + k] - 0.5 * jrho_A[BF * n * n + k] ) * jArea[BF]  // Bottom-face contribution
+                + (jPlus_A[TF * n * n + k] - 0.5 * jrho_A[TF * n * n + k] ) * jArea[TF]; // Top-face contribution
+
+            C[k] = -(jPlus_A[BF * n * n + k] - 0.5 * jrho_A[BF * n * n + k] ) * jArea[BF];
+        }
+
+        for (int k = 0; k < n; ++k) 
+            F[k] = (iFlux[LF * n + k] - irho_flux[LF * n + k] ) * iArea[LF]
+                - (iFlux[RF * n + k] - irho_flux[RF * n + k] ) * iArea[RF]
+                + (jFlux[BF * n + k] - jrho_flux[BF * n + k] ) * jArea[BF]
+                - (jFlux[TF * n + k] - jrho_flux[TF * n + k] ) * jArea[TF]
+                + rv1[k] * iArea[LF]
+                - rv2[k] * iArea[RF];
+
+        // Form alpha
+        matmat_mult(B.data(), &g[(j + 1) * n * n], rm1.data(), n);
+        for (int k = 0; k < n * n; ++k) 
+            alpha[k] = A[k] - rm1[k];
+    
+        // Form g
+        matrix_divide(alpha.data(), C.data(), &g[j * n * n], n, n); 
+
+        // Form v
+        matvec_mult(B.data(), &v[(j + 1) * n], rv1.data(), n); 
+        for (int k = 0; k < n; ++k) 
+            rv2[k] = F[k] - rv1[k];        
+        matrix_divide(alpha.data(), rv2.data(), &v[j * n], n, 1);
+    }
+    // ==================== Bottom cell ===================== //
+    j = 0;
+
+    LF = (i * Ny + j), RF = ((i + 1) * Ny + j), 
+    BF = (i * (Ny + 1) + j), TF = (i * (Ny + 1) + j + 1),
+    CC = i * Ny + j;
+
+    // Bottom face
+    for (int k = 0; k < n * n; ++k) 
+        rm0[k] = jPlus_A[BF * n * n + k] - 0.5 * jrho_A[BF * n * n + k];
+
+    matmat_mult(&jEB[i * n * n], rm0.data(), rm1.data(), n);
+
+    // Left face
+    for (int k = 0; k < n * n; ++k) 
+        rm0[k] = iPlus_A[LF * n * n + k] - 0.5 * irho_A[LF * n * n + k]; 
+
+    matvec_mult(rm0.data(), &dU_old[(i * (Ny + 2) + j + 1) * n], rv1.data(), n);
+
+    // Right face
+    for (int k = 0; k < n * n; ++k) 
+        rm0[k] = iMinus_A[RF * n * n + k] - 0.5 * irho_A[RF * n * n + k]; 
+
+    matvec_mult(rm0.data(), &dU_old[((i + 2) * (Ny + 2) + j + 1) * n], rv2.data(), n); 
+
+
+    for (int k = 0; k < n * n; ++k) {
+
+        B[k] = (jMinus_A[TF * n * n + k] - 0.5 * jrho_A[TF * n * n + k] ) * jArea[TF]; 
+
+        A[k] = 
+        Volume[CC] / dt * I[k]          // Time-derivative part
+        - (iMinus_A[LF * n * n + k] - 0.5 * irho_A[LF * n * n + k] ) * iArea[LF] // Left-face contribution
+        + (iPlus_A[RF * n * n + k] - 0.5 * irho_A[RF * n * n + k] ) * iArea[RF]   // Right-face contribution
+        - (jMinus_A[BF * n * n + k] - 0.5 * jrho_A[BF * n * n + k] + rm1[k] ) * jArea[BF]  // Bottom-face contribution
+        + (jPlus_A[TF * n * n + k] - 0.5 * jrho_A[TF * n * n + k] )* jArea[TF]; // Top-face contribution
+    }
+
+    for (int k = 0; k < n; ++k) 
+        F[k] = (iFlux[LF * n + k] - irho_flux[LF * n + k] ) * iArea[LF]
+            - (iFlux[RF * n + k] - irho_flux[RF * n + k] ) * iArea[RF]
+            + (jFlux[BF * n + k] - jrho_flux[BF * n + k] ) * jArea[BF]
+            - (jFlux[TF * n + k] - jrho_flux[TF * n + k] ) * jArea[TF]
+            + rv1[k] * iArea[LF]
+            - rv2[k] * iArea[RF];
+    
+    // Form alpha
+    matmat_mult(B.data(), &g[(j + 1) * n * n], rm1.data(), n);
+    for (int k = 0; k < n * n; ++k) 
+        alpha[k] = A[k] - rm1[k];
+
+    // Form v
+    matvec_mult(B.data(), &v[(j + 1) * n], rv1.data(), n);
+    for (int k = 0; k < n; ++k) 
+        rv2[k] = F[k] - rv1[k];
+    matrix_divide(alpha.data(), rv2.data(), &v[j * n], n, 1); 
+
+    // ====================== Solve for dU_new ====================== //
+    for (int k = 0; k < n; ++k)
+        dU_new[((i + 1) * (Ny + 2) + j + 1) * n + k] = v[0 * n + k];
+
+    for (int j = 1; j < Ny; ++j) {
+        matvec_mult(&g[j * n * n], &dU_new[((i + 1) * (Ny + 2) + j) * n], rv1.data(), n);
+        for (int k = 0; k < n; ++k) 
+            dU_new[((i + 1) * (Ny + 2) + j + 1) * n + k] = v[j * n + k] - rv1[k];
+    }
+}
+void Solver2D::relax_right_line_real() {
+
+    if (rank == size - 1) {
+
+        for (int i = 0; i < Nx_local - 1; ++i) {
+            relax_inner_lines_real(i); 
+        }
+
+        // ====================== Top cell ====================== // 
+        int i = Nx_local - 1, j = Ny - 1; 
+        int LF = (i * Ny + j), RF = ((i + 1) * Ny + j), 
+            BF = (i * (Ny + 1) + j), TF = (i * (Ny + 1) + j + 1),
+            CC = i * Ny + j;
+
+        // Right face
+        for (int k = 0; k < n * n; ++k) 
+            rm0[k] = iMinus_A[RF * n * n + k] - 0.5 * irho_A[RF * n * n + k];
+        
+        matmat_mult(&iER[j * n * n], rm0.data(), rm1.data(), n);
+
+        // Left face
+        for (int k = 0; k < n * n; ++k) 
+            rm0[k] = iPlus_A[LF * n * n + k] - 0.5 * irho_A[LF * n * n + k];
+
+        matvec_mult(rm0.data(), &dU_old[(i * (Ny + 2) + j + 1) * n], rv1.data(), n);
+
+        // Top face
+        for (int k = 0; k < n * n; ++k) 
+            rm0[k] = jMinus_A[TF * n * n + k] - 0.5 * jrho_A[TF * n * n + k];
+
+        matmat_mult(&jET[i * n * n], rm0.data(), rm2.data(), n);
+    
+
+        for (int k = 0; k < n * n; ++k) {
+            A[k] = 
+            Volume[CC] / dt * I[k]          // Time-derivative part
+            - (iMinus_A[LF * n * n + k] - 0.5 * irho_A[LF * n * n + k] ) * iArea[LF] // Left-face contribution
+            + (iPlus_A[RF * n * n + k] - 0.5 * irho_A[RF * n * n + k] + rm1[k]) * iArea[RF]   // Right-face contribution
+            - (jMinus_A[BF * n * n + k] - 0.5 * jrho_A[BF * n * n + k] ) * jArea[BF]  // Bottom-face contribution
+            + (jPlus_A[TF * n * n + k] - 0.5 * jrho_A[TF * n * n + k] + rm2[k]) * jArea[TF]; // Top-face contribution
+
+            C[k] = -(jPlus_A[BF * n * n + k] - 0.5 * jrho_A[BF * n * n + k] ) * jArea[BF];
+        }
+
+        for (int k = 0; k < n; ++k) 
+            F[k] = (iFlux[LF * n + k] - irho_flux[LF * n + k] ) * iArea[LF]
+                - (iFlux[RF * n + k] - irho_flux[RF * n + k] ) * iArea[RF]
+                + (jFlux[BF * n + k] - jrho_flux[BF * n + k] ) * jArea[BF]
+                - (jFlux[TF * n + k] - jrho_flux[TF * n + k] ) * jArea[TF]
+                + rv1[k] * iArea[LF];
+        
+        alpha = A;
+        matrix_divide(alpha.data(), F.data(), &v[j * n], n, 1);  //n = rows of x, m = columns of x
+        matrix_divide(alpha.data(), C.data(), &g[j * n * n], n, n); 
+
+
+        // ======================= Inner cells ======================== //
+        for (int j = Ny - 2; j > 0; --j) {
+
+            LF = (i * Ny + j), RF = ((i + 1) * Ny + j), 
+            BF = (i * (Ny + 1) + j), TF = (i * (Ny + 1) + j + 1),
+            CC = i * Ny + j;
+
+            // Right face
+            for (int k = 0; k < n * n; ++k) 
+                rm0[k] = iMinus_A[RF * n * n + k] - 0.5 * irho_A[RF * n * n + k];
+            
+            matmat_mult(&iER[j * n * n], rm0.data(), rm1.data(), n);
+
+            // Left face
+            for (int k = 0; k < n * n; ++k) 
+                rm0[k] = iPlus_A[LF * n * n + k] - 0.5 * irho_A[LF * n * n + k];
+
+            matvec_mult(rm0.data(), &dU_old[(i * (Ny + 2) + j + 1) * n], rv1.data(), n);
+
+
+            for (int k =  0; k < n * n; ++k) {
+                B[k] = (jMinus_A[TF * n * n + k] - 0.5 * jrho_A[TF * n * n + k] ) * jArea[TF]; 
+
+                A[k] = 
+                    Volume[CC] / dt * I[k]          // Time-derivative part
+                    - (iMinus_A[LF * n * n + k] - 0.5 * irho_A[LF * n * n + k] ) * iArea[LF] // Left-face contribution
+                    + (iPlus_A[RF * n * n + k] - 0.5 * irho_A[RF * n * n + k] + rm1[k]) * iArea[RF]   // Right-face contribution
+                    - (jMinus_A[BF * n * n + k] - 0.5 * jrho_A[BF * n * n + k] ) * jArea[BF]  // Bottom-face contribution
+                    + (jPlus_A[TF * n * n + k] - 0.5 * jrho_A[TF * n * n + k] ) * jArea[TF]; // Top-face contribution
+
+                C[k] = -(jPlus_A[BF * n * n + k] - 0.5 * jrho_A[BF * n * n + k] ) * jArea[BF];
+            }
+
+            for (int k = 0; k < n; ++k) 
+                F[k] = (iFlux[LF * n + k] - irho_flux[LF * n + k] ) * iArea[LF]
+                    - (iFlux[RF * n + k] - irho_flux[RF * n + k] ) * iArea[RF]
+                    + (jFlux[BF * n + k] - jrho_flux[BF * n + k] ) * jArea[BF]
+                    - (jFlux[TF * n + k] - jrho_flux[TF * n + k] ) * jArea[TF]
+                    + rv1[k] * iArea[LF];
+
+            // Form alpha
+            matmat_mult(B.data(), &g[(j + 1) * n * n], rm1.data(), n);
+            for (int k = 0; k < n * n; ++k) 
+                alpha[k] = A[k] - rm1[k];
+        
+            // Form g
+            matrix_divide(alpha.data(), C.data(), &g[j * n * n], n, n); 
+
+            // Form v
+            matvec_mult(B.data(), &v[(j + 1) * n], rv1.data(), n); 
+            for (int k = 0; k < n; ++k) 
+                rv2[k] = F[k] - rv1[k];        
+            matrix_divide(alpha.data(), rv2.data(), &v[j * n], n, 1);
+        }
+
+        // ==================== Bottom cell ===================== //
+        j = 0;
+
+        LF = (i * Ny + j), RF = ((i + 1) * Ny + j), 
+        BF = (i * (Ny + 1) + j), TF = (i * (Ny + 1) + j + 1),
+        CC = i * Ny + j;
+
+        // Right face
+        for (int k = 0; k < n * n; ++k) 
+            rm0[k] = iMinus_A[RF * n * n + k] - 0.5 * irho_A[RF * n * n + k];
+        
+        matmat_mult(&iER[j * n * n], rm0.data(), rm1.data(), n);
+
+        // Left face
+        for (int k = 0; k < n * n; ++k) 
+            rm0[k] = iPlus_A[LF * n * n + k] - 0.5 * irho_A[LF * n * n + k];
+
+        matvec_mult(rm0.data(), &dU_old[(i * (Ny + 2) + j + 1) * n], rv1.data(), n);
+
+        // Bottom face
+        for (int k = 0; k < n * n; ++k)
+            rm0[k] = jPlus_A[BF * n * n + k] - 0.5 * jrho_A[BF * n * n + k];
+      
+        matmat_mult(&jEB[i * n * n], rm0.data(), rm2.data(), n); 
+
+        for (int k = 0; k < n * n; ++k) {
+
+            B[k] = (jMinus_A[TF * n * n + k] - 0.5 * jrho_A[TF * n * n + k] ) * jArea[TF]; 
+
+            A[k] = 
+            Volume[CC] / dt * I[k]          // Time-derivative part
+            - (iMinus_A[LF * n * n + k] - 0.5 * irho_A[LF * n * n + k] ) * iArea[LF] // Left-face contribution
+            + (iPlus_A[RF * n * n + k] - 0.5 * irho_A[RF * n * n + k] + rm1[k]) * iArea[RF]   // Right-face contribution
+            - (jMinus_A[BF * n * n + k] - 0.5 * jrho_A[BF * n * n + k] + rm2[k]) * jArea[BF]  // Bottom-face contribution
+            + (jPlus_A[TF * n * n + k] - 0.5 * jrho_A[TF * n * n + k] ) * jArea[TF]; // Top-face contribution
+        }
+
+        for (int k = 0; k < n; ++k) 
+            F[k] = (iFlux[LF * n + k] - irho_flux[LF * n + k] ) * iArea[LF]
+                - (iFlux[RF * n + k] - irho_flux[RF * n + k] ) * iArea[RF]
+                + (jFlux[BF * n + k] - jrho_flux[BF * n + k] ) * jArea[BF]
+                - (jFlux[TF * n + k] - jrho_flux[TF * n + k] ) * jArea[TF]
+                + rv1[k] * iArea[LF];
+        
+        // Form alpha
+        matmat_mult(B.data(), &g[(j + 1) * n * n], rm1.data(), n);
+        for (int k = 0; k < n * n; ++k) 
+            alpha[k] = A[k] - rm1[k];
+
+        // Form v
+        matvec_mult(B.data(), &v[(j + 1) * n], rv1.data(), n);
+        for (int k = 0; k < n; ++k) 
+            rv2[k] = F[k] - rv1[k];
+        matrix_divide(alpha.data(), rv2.data(), &v[j * n], n, 1); 
+
+        // ====================== Solve for dU_new ====================== //
+        for (int k = 0; k < n; ++k)
+            dU_new[((i + 1) * (Ny + 2) + j + 1) * n + k] = v[0 * n + k];
+
+        for (int j = 1; j < Ny; ++j) {
+            matvec_mult(&g[j * n * n], &dU_new[((i + 1) * (Ny + 2) + j) * n], rv1.data(), n);
+            for (int k = 0; k < n; ++k) 
+                dU_new[((i + 1) * (Ny + 2) + j + 1) * n + k] = v[j * n + k] - rv1[k];
+        }        
+    }
+}
+
 void Solver2D::update_U() {
 
     for (int i = 1; i < Nx_local + 1; ++i) {
@@ -1857,8 +2427,8 @@ void Solver2D::compute_dt() {
 
     for (int i = 0; i < Nx_local; ++i) {
         for (int j = 0; j < Ny; ++j) {
-            constoprim(&U[((i + 1) * (Ny + 2) + j + 1) * n], V.data(), n_vel);
-            c = sqrt(perfgam * V[3] / V[0]);
+            constoprim(&U[((i + 1) * (Ny + 2) + j + 1) * n], V.data(), cell_thermo[(i + 1) * (Ny + 2) + j + 1].gamma, n_vel);
+            c = cell_thermo[(i + 1) * (Ny + 2) + j + 1].a;  
 
             l = (fabs(V[1] * iFxNorm[i * Ny + j] + V[2] * iFyNorm[i * Ny + j]) + c) * iArea[i * Ny + j];   
 			r = (fabs(V[1] * iFxNorm[(i + 1) * Ny + j] + V[2] * iFyNorm[(i + 1) * Ny + j]) + c) * iArea[(i + 1) * Ny + j];   
@@ -1882,7 +2452,7 @@ void Solver2D::compute_dt() {
     dt = CFL/dt_global; 
 
 }
-void Solver2D::compute_inner_res() {
+void Solver2D::compute_inner_res_perf() {
 
     Vector X(n, 0.0), Y(n, 0.0), Z(n, 0.0), ID = {1, 0, 0, 0}; 
 
@@ -1929,10 +2499,68 @@ void Solver2D::compute_inner_res() {
     MPI_Allreduce(&inner_res_local, &inner_res, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
 
     inner_res = sqrt(inner_res); 
-
-
 }
-void Solver2D::compute_outer_res() {
+void Solver2D::compute_inner_res_real() {
+
+    Vector X(n, 0.0), Y(n, 0.0), Z(n, 0.0), ID = {1, 0, 0, 0}; 
+
+    inner_res = 0.0; 
+    double inner_res_local = 0.0;
+    double F, res = 0.0;
+    Vector vv1(4), vv2(4); 
+
+    for (int i = 2; i < Nx_local; ++i) {
+        for (int j = 2; j < Ny; ++j) {
+
+            int LF = (i * Ny + j), RF = ((i + 1) * Ny + j), 
+            BF = (i * (Ny + 1) + j), TF = (i * (Ny + 1) + j + 1),
+            CC = i * Ny + j;
+
+            // Left face
+            for (int k = 0; k < n; ++k) 
+                vv1[k] = iPlus_A[LF * n * n + k] - 0.5 * irho_A[LF * n * n + k]; 
+
+            // Right face
+            for (int k = 0; k < n; ++k) 
+                vv2[k] = iMinus_A[RF * n * n + k] - 0.5 * irho_A[RF * n * n + k]; 
+
+
+            for (int k =  0; k < n; ++k) {
+                Y[k] = (jMinus_A[TF * n * n + k] - 0.5 * jrho_A[TF * n * n + k] ) * jArea[TF]; 
+
+                X[k] = 
+                    Volume[CC] / dt * I[k]          // Time-derivative part
+                    - (iMinus_A[LF * n * n + k] - 0.5 * irho_A[LF * n * n + k] ) * iArea[LF] // Left-face contribution
+                    + (iPlus_A[RF * n * n + k] - 0.5 * irho_A[RF * n * n + k] ) * iArea[RF]   // Right-face contribution
+                    - (jMinus_A[BF * n * n + k] - 0.5 * jrho_A[BF * n * n + k] ) * jArea[BF]  // Bottom-face contribution
+                    + (jPlus_A[TF * n * n + k] - 0.5 * jrho_A[TF * n * n + k] ) * jArea[TF]; // Top-face contribution
+
+                Z[k] = -(jPlus_A[BF * n * n + k] - 0.5 * jrho_A[BF * n * n + k] ) * jArea[BF];
+            }
+
+        
+            F = (iFlux[LF * n] - irho_flux[LF * n] ) * iArea[LF]
+                - (iFlux[RF * n] - irho_flux[RF * n] ) * iArea[RF]
+                + (jFlux[BF * n] - jrho_flux[BF * n] ) * jArea[BF]
+                - (jFlux[TF * n] - jrho_flux[TF * n] ) * jArea[TF]
+                + dot_product(vv1.data(), &dU_old[(i * (Ny + 2) + j + 1) * n], n) * iArea[LF]
+                - dot_product(vv2.data(), &dU_old[((i + 2) * (Ny + 2) + j + 1) * n], n) * iArea[RF];
+
+
+            res = dot_product(Y.data(), &dU_old[((i + 1) * (Ny + 2) + j + 2) * n], n)
+                    + dot_product(X.data(), &dU_old[((i + 1) * (Ny + 2) + j + 1) * n], n) 
+                    + dot_product(Z.data(), &dU_old[((i + 1) * (Ny + 2) + j) * n], n) - F; 
+
+            inner_res_local += res * res;
+        }
+    }
+
+    MPI_Allreduce(&inner_res_local, &inner_res, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+
+    inner_res = sqrt(inner_res); 
+}
+
+void Solver2D::compute_outer_res_perf() {
     outer_res = 0.0;
     double outer_res_local = 0.0;
     double intres;
@@ -1951,6 +2579,27 @@ void Solver2D::compute_outer_res() {
     MPI_Allreduce(&outer_res_local, &outer_res, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
     outer_res = sqrt(outer_res); 
 }
+void Solver2D::compute_outer_res_real() {
+    outer_res = 0.0;
+    double outer_res_local = 0.0;
+    double intres;
+
+    for (int i = 0; i < Nx_local; ++i) {
+        for (int j = 0; j < Ny; ++j) {
+
+            intres = (- (iFlux[(i * Ny + j) * n] - irho_flux[(i * Ny + j) * n] ) * iArea[i * Ny + j]
+                        + (iFlux[((i + 1) * Ny + j) * n] - irho_flux[((i + 1) * Ny + j) * n] ) * iArea[(i + 1) * Ny + j]
+                        - (jFlux[(i * (Ny + 1) + j) * n] - jrho_flux[(i * (Ny + 1) + j) * n] ) * jArea[(i * (Ny + 1) + j)]
+                        + (jFlux[(i * (Ny + 1) + j + 1) * n] - jrho_flux[(i * (Ny + 1) + j + 1) * n] ) * jArea[i * (Ny + 1) + j + 1] ) / Volume[i * Ny + j];
+
+            outer_res_local += intres * intres;      
+        }
+    }
+
+    MPI_Allreduce(&outer_res_local, &outer_res, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    outer_res = sqrt(outer_res); 
+}
+
 void Solver2D::explicit_update() {
 
     // cout << endl << "dU_old: " << endl;
@@ -1975,7 +2624,6 @@ void Solver2D::explicit_update() {
     }
 }
 
-
 void Solver2D::print_by_rank(Vector Vec, int nx, int ny, int nvars, string name){
 
     for (int r = 0; r < size; ++r) {
@@ -1996,79 +2644,6 @@ void Solver2D::print_by_rank(Vector Vec, int nx, int ny, int nvars, string name)
         }
     }
 
-}
-void Solver2D::writeTecplotDat(const string& filename) {
-    if (rank != 0) return;
-
-    ofstream file(filename);
-    file << "VARIABLES = \"x\", \"y\", \"density\", \"u-vel\", \"v-vel\", \"pressure\"\n";
-    file << "ZONE T=\"Flow Field\", I=" << Nx + 1 << ", J=" << Ny + 1 << ", F=BLOCK\n";
-    file << "VARLOCATION=([3-6]=CELLCENTERED)\n";
-
-    // Write X vertices (node-centered, i-fastest)
-    for (int j = 0; j < Ny + 1; ++j) {
-        for (int i = 0; i < Nx + 1; ++i) {
-            int idx = i * (Ny + 1) + j;
-            file << x_vertices[idx] << "\n";
-        }
-    }
-
-    // Write Y vertices (node-centered, i-fastest)
-    for (int j = 0; j < Ny + 1; ++j) {
-        for (int i = 0; i < Nx + 1; ++i) {
-            int idx = i * (Ny + 1) + j;
-            file << y_vertices[idx] << "\n";
-        }
-    }
-
-    // Allocate temporary variable to hold primitive variables
-    Vector V(n, 0.0);
-
-    // Create buffers for each cell-centered variable
-    Vector density(Nx * Ny), uvel(Nx * Ny), vvel(Nx * Ny), pressure(Nx * Ny);
-
-    // Extract and store all primitive variables first (i-fastest)
-    for (int j = 0; j < Ny; ++j) {
-        for (int i = 0; i < Nx; ++i) {
-            int idx = i * Ny + j;
-            constoprim(&U_gathered[idx * n], V.data(), n_vel);
-            density[idx]  = V[0];
-            uvel[idx]     = V[1];
-            vvel[idx]     = V[2];
-            pressure[idx] = V[3];
-        }
-    }
-
-    // Write each variable block (i-fastest order)
-    for (int j = 0; j < Ny; ++j) {
-        for (int i = 0; i < Nx; ++i) {
-            int idx = i * Ny + j;
-            file << density[idx] << "\n";
-        }
-    }
-
-    for (int j = 0; j < Ny; ++j) {
-        for (int i = 0; i < Nx; ++i) {
-            int idx = i * Ny + j;
-            file << uvel[idx] << "\n";
-        }
-    }
-
-    for (int j = 0; j < Ny; ++j) {  
-        for (int i = 0; i < Nx; ++i) {
-            int idx = i * Ny + j;
-            file << vvel[idx] << "\n";
-        }
-    }
-
-    for (int j = 0; j < Ny; ++j) {
-        for (int i = 0; i < Nx; ++i) {
-            int idx = i * Ny + j;
-            file << pressure[idx] << "\n";
-        }
-    }
-
-    cout << "File created: " << filename << std::endl;
 }
 void Solver2D::finalize() {
 
@@ -2099,22 +2674,19 @@ void Solver2D::finalize() {
         0, MPI_COMM_WORLD
     );        
 
-    string filename = "TESTING_PLOT.dat";
-    writeTecplotDat(filename); 
+    writeTecplotDat(); 
 
     if (rank == 0) cout << "Program finished!" << endl; 
-
-
 }
 
 void Solver2D::load_thermochemical_table() {
-    constexpr int N = 500;
+    const int N = 500;
 
-    string filename = "../gibbslib/thermochemical_table.csv";
-    ifstream file(filename); 
+    string thermofilename = "../gibbslib/thermochemical_table.csv";
+    ifstream file(thermofilename); 
 
     if (!file.is_open()) {
-        cerr << "Error: could not open " << filename << "\n";
+        cerr << "Error: could not open " << thermofilename << "\n";
         return;
     }
 
@@ -2122,10 +2694,6 @@ void Solver2D::load_thermochemical_table() {
     getline(file, line); // skip header
 
     // Resize table and coordinate vectors
-    thermochemical_table.resize(N * N);
-    densities.resize(N);
-    internal_energies.resize(N);
-
     int count = 0;
 
     for (int i = 0; i < N; ++i) {
@@ -2150,31 +2718,29 @@ void Solver2D::load_thermochemical_table() {
 
             if (!read(entry.rho)    || !read(entry.e)    || !read(entry.p) ||
                 !read(entry.T)      || !read(entry.R)    || !read(entry.cv) ||
-                !read(entry.gamma)  || !read(entry.dpdrho) || !getline(ss, token)) {
+                !read(entry.gamma)  || !read(entry.dpdrho) ||!read(entry.dpde) || !getline(ss, token)) {
                 cerr << "Error: incomplete or bad format at entry " << count << "\n";
                 return;
             }
 
-            entry.dpde = stod(token); // last field, no comma
+            entry.a = stod(token); // last field, no comma
 
             thermochemical_table[i * N + j] = entry;
-
-            if (j == 0) densities[i] = entry.rho;
-            if (i == 0) internal_energies[j] = entry.e;
 
             ++count;
         }
     }
 
-    cout << "Successfully loaded " << count << " thermochemical entries.\n";
+    if (rank == 0) 
+        cout << "Successfully loaded " << count << " thermochemical entries.\n";
 }
 ThermoEntry Solver2D::bilinear_interpolate(double rho, double e) {
     constexpr int N = 500;
 
     // Return default entry if out of bounds
-    if (rho < densities.front() || rho > densities.back() ||
-        e   < internal_energies.front() || e > internal_energies.back()) {
-        cerr << "Warning: interpolation input (rho=" << rho << ", e=" << e << ") out of bounds.\n";
+    if (rho < 1e-3 || rho > 2.0 ||
+        e   < 717 * 600 || e > 5e7) {
+        cout << "Warning: interpolation input (rho=" << rho << ", e=" << e << ") out of bounds.\n";
         return ThermoEntry{};
     }
 
@@ -2224,36 +2790,47 @@ ThermoEntry Solver2D::bilinear_interpolate(double rho, double e) {
     result.gamma  = bilinear(Q11.gamma, Q21.gamma, Q12.gamma, Q22.gamma);
     result.dpdrho = bilinear(Q11.dpdrho, Q21.dpdrho, Q12.dpdrho, Q22.dpdrho);
     result.dpde   = bilinear(Q11.dpde, Q21.dpde, Q12.dpde, Q22.dpde);
+    result.a   = bilinear(Q11.a, Q21.a, Q12.a, Q22.a);
 
     return result;
 }
-
 void Solver2D::initialize_chemistry() {
+
     if (real_gas) {
 
-        ThermoEntry holder;
         double density, energy; 
 
-            for (int i = 0; i < Nx_local + 2; ++i) {
-                for (int j = 0; j < Ny + 2; ++j) {
+        for (int i = 0; i < Nx_local + 2; ++i) {
+            for (int j = 0; j < Ny + 2; ++j) {
 
-                    int idx = (i * (Ny + 2) + j) * n;
-                    density = U[idx];
-                    energy =  computeInternalEnergy(&U[idx], n_vel);
+                int idx = (i * (Ny + 2) + j) * n;
+                density = U[idx];
+                cout << "density: " << density << endl;
+                
+                energy =  computeInternalEnergy(&U[idx], n_vel);
+                cout << "internal energy: " << energy << endl;
 
-                    if (using_table) {         
-                        holder = bilinear_interpolate(density, energy);                     
-                    }
-                    else {                    
-                        holder = chem.compute_equilibrium_thermo_vars(density, energy); 
-                    }
-
-                    cell_thermo[i * (Ny + 2) + j] = holder;
-                    cell_thermo[i * (Ny + 2) + j].a = sqrt(cell_thermo[idx].p / (cell_thermo[idx].rho * cell_thermo[idx].rho) * cell_thermo[idx].dpde + cell_thermo[idx].rho);
-                    
-
+                if (using_table) {         
+                    cell_thermo[i * (Ny + 2) + j] = bilinear_interpolate(density, energy);                     
                 }
+                else {                    
+                    cell_thermo[i * (Ny + 2) + j] = chem.compute_equilibrium_thermodynamic_variables(density, energy); 
+                }
+
+
             }
+        }
+
+        cout << "density: " << cell_thermo[50].rho << endl;
+        cout << "internal energy: " << cell_thermo[50].e << endl;
+        cout << "pressure: " << cell_thermo[50].p << endl;
+        cout << "temperature: " << cell_thermo[50].T << endl;
+        cout << "R: " << cell_thermo[50].R << endl;
+        cout << "Cv: " << cell_thermo[50].cv << endl;
+        cout << "gamma: " << cell_thermo[50].gamma << endl;
+        cout << "dpdrho " << cell_thermo[50].dpdrho << endl;
+        cout << "dpde: " << cell_thermo[50].dpde << endl;
+        cout << "a: " << cell_thermo[50].a << endl;
 
     }       
     else {
@@ -2262,12 +2839,9 @@ void Solver2D::initialize_chemistry() {
             for (int j = 0; j < Ny + 2; ++j) {
                 int idx = i * (Ny + 2) + j;
 
-                if (is_near_inlet_state(&U[idx * n]))
-                    continue;
-
                 cell_thermo[idx].rho = U[idx * n];
                 cell_thermo[idx].e = computeInternalEnergy(&U[idx * n], n_vel);
-                cell_thermo[idx].p = computePressure(&U[idx * n], n_vel);
+                cell_thermo[idx].p = computePressure(&U[idx * n], perfgam, n_vel);
                 cell_thermo[idx].R = 287.0;
                 cell_thermo[idx].cv = 717.0;
                 cell_thermo[idx].gamma = perfgam;
@@ -2277,59 +2851,48 @@ void Solver2D::initialize_chemistry() {
 
             }
         }
-
     }
 }
-
 void Solver2D::get_real_chemistry() {
 
-    ThermoEntry holder;
     double density, energy; 
 
-        for (int i = 0; i < Nx_local + 2; ++i) {
-            for (int j = 0; j < Ny + 2; ++j) {
-                int idx = (i * (Ny + 2) + j) * n;
-                density = U[idx];
-                energy =  computeInternalEnergy(&U[idx], n_vel);
+    for (int i = 0; i < Nx_local + 2; ++i) {
+        for (int j = 0; j < Ny + 2; ++j) {
+            
+            int idx = (i * (Ny + 2) + j) * n;
+            density = U[idx];
+            energy =  computeInternalEnergy(&U[idx], n_vel);
 
-                if (is_near_inlet_state(&U[idx]))
-                    continue;
-
-                if (using_table) {         
-                    holder = bilinear_interpolate(density, energy);                     
-                }
-                else {                    
-                    holder = chem.compute_equilibrium_thermo_vars(density, energy); 
-                }
-
-                cell_thermo[i * (Ny + 2) + j] = holder;
-                cell_thermo[i * (Ny + 2) + j].a = sqrt(cell_thermo[idx].p / (cell_thermo[idx].rho * cell_thermo[idx].rho) * cell_thermo[idx].dpde + cell_thermo[idx].rho);
-                
-
+            if (using_table) {         
+                cell_thermo[i * (Ny + 2) + j] = bilinear_interpolate(density, energy);                     
+            }
+            else {                    
+                cell_thermo[i * (Ny + 2) + j] = chem.compute_equilibrium_thermodynamic_variables(density, energy); 
             }
         }
+    }
 
 }
 void Solver2D::get_perf_chemistry() {
 
-        for (int i = 0; i < Nx_local + 2; ++i) {
-            for (int j = 0; j < Ny + 2; ++j) {
-                int idx = i * (Ny + 2) + j;
+    for (int i = 0; i < Nx_local + 2; ++i) {
+        for (int j = 0; j < Ny + 2; ++j) {
+            int idx = i * (Ny + 2) + j;
 
-                cell_thermo[idx].rho = U[idx * n];
-                cell_thermo[idx].e = computeInternalEnergy(&U[idx * n], n_vel);
-                cell_thermo[idx].p = computePressure(&U[idx * n], n_vel);
-                cell_thermo[idx].R = 287.0;
-                cell_thermo[idx].cv = 717.0;
-                cell_thermo[idx].gamma = perfgam;
-                cell_thermo[idx].dpdrho = (perfgam - 1) * cell_thermo[idx].e;
-                cell_thermo[idx].dpde = (perfgam - 1) * cell_thermo[idx].rho;
-                cell_thermo[idx].a = sqrt(perfgam * cell_thermo[idx].p / cell_thermo[idx].rho);
+            cell_thermo[idx].rho = U[idx * n];
+            cell_thermo[idx].e = computeInternalEnergy(&U[idx * n], n_vel);
+            cell_thermo[idx].p = computePressure(&U[idx * n], perfgam, n_vel);
+            cell_thermo[idx].R = 287.0;
+            cell_thermo[idx].cv = 717.0;
+            cell_thermo[idx].gamma = perfgam;
+            cell_thermo[idx].dpdrho = (perfgam - 1) * cell_thermo[idx].e;
+            cell_thermo[idx].dpde = (perfgam - 1) * cell_thermo[idx].rho;
+            cell_thermo[idx].a = sqrt(perfgam * cell_thermo[idx].p / cell_thermo[idx].rho);
 
-            }
         }
+    }
 }
-
 bool Solver2D::is_near_inlet_state(const double* U) const {
     const double rho = U[0];
     const double u = U[1] / rho;
@@ -2343,4 +2906,140 @@ bool Solver2D::is_near_inlet_state(const double* U) const {
     const bool e_ok   = fabs(e   - e_inlet)   / e_inlet   <= rel_tol;
 
     return rho_ok && e_ok;
+}
+
+void Solver2D::writeTecplotDat() {
+    if (rank != 0) return;
+
+    ofstream file(filename);
+    file << "VARIABLES = \"x\", \"y\", \"density\", \"u-vel\", \"v-vel\", \"pressure\", \"temperature\", \"a\", \"e\" \n";
+    file << "ZONE T=\"Flow Field\", I=" << Nx + 1 << ", J=" << Ny + 1 << ", F=BLOCK\n";
+    file << "VARLOCATION=([3-9]=CELLCENTERED)\n";
+
+    vector<ThermoEntry> thermo(Nx * Ny); 
+
+    if (real_gas) {
+        for (int i = 0; i < Nx; ++i) {
+            for (int j = 0; j < Ny; ++j) {
+                int idx = i * Ny + j;
+
+                double density = U_gathered[idx];
+                double energy =  computeInternalEnergy(&U_gathered[idx], n_vel);
+
+                if (using_table == false) {
+                    thermo[idx] = chem.compute_equilibrium_thermodynamic_variables(density, energy);
+                }
+                else {
+                    thermo[idx] = bilinear_interpolate(density, energy); 
+                }
+            }
+        }
+    }
+    else {
+
+        for (int i = 0; i < Nx; ++i) {
+            for (int j = 0; j < Ny; ++j) {
+
+                int idx = i * Ny + j;
+                
+                thermo[idx].rho = U_gathered[idx * n];
+                thermo[idx].e = computeInternalEnergy(&U_gathered[idx * n], n_vel);
+                thermo[idx].p = computePressure(&U_gathered[idx * n], perfgam, n_vel);
+                thermo[idx].R = 287.0;
+                thermo[idx].cv = 717.0;
+                thermo[idx].gamma = perfgam;
+                thermo[idx].dpdrho = (perfgam - 1) * thermo[idx].e;
+                thermo[idx].dpde = (perfgam - 1) * thermo[idx].rho;
+                thermo[idx].a = sqrt(perfgam * thermo[idx].p / thermo[idx].rho);
+            }
+        }
+
+    }
+
+    // Write X vertices (node-centered, i-fastest)
+    for (int j = 0; j < Ny + 1; ++j) {
+        for (int i = 0; i < Nx + 1; ++i) {
+            int idx = i * (Ny + 1) + j;
+            file << x_vertices[idx] << "\n";
+        }
+    }
+
+    // Write Y vertices (node-centered, i-fastest)
+    for (int j = 0; j < Ny + 1; ++j) {
+        for (int i = 0; i < Nx + 1; ++i) {
+            int idx = i * (Ny + 1) + j;
+            file << y_vertices[idx] << "\n";
+        }
+    }
+
+    // Allocate temporary variable to hold primitive variables
+    Vector V(n, 0.0);
+
+    // Create buffers for each cell-centered variable
+    Vector density(Nx * Ny), uvel(Nx * Ny), vvel(Nx * Ny), pressure(Nx * Ny), temperature(Nx * Ny);
+
+    // Extract and store all primitive variables first (i-fastest)
+    for (int j = 0; j < Ny; ++j) {
+        for (int i = 0; i < Nx; ++i) {
+            int idx = i * Ny + j;
+            constoprim(&U_gathered[idx * n], V.data(), thermo[idx].gamma, n_vel);
+            density[idx]  = V[0];
+            uvel[idx]     = V[1];
+            vvel[idx]     = V[2];
+            pressure[idx] = thermo[idx].p;
+        }
+    }
+
+    // Write each variable block (i-fastest order)
+    for (int j = 0; j < Ny; ++j) {
+        for (int i = 0; i < Nx; ++i) {
+            int idx = i * Ny + j;
+            file << density[idx] << "\n";
+        }
+    }
+
+    for (int j = 0; j < Ny; ++j) {
+        for (int i = 0; i < Nx; ++i) {
+            int idx = i * Ny + j;
+            file << uvel[idx] << "\n";
+        }
+    }
+
+    for (int j = 0; j < Ny; ++j) {  
+        for (int i = 0; i < Nx; ++i) {
+            int idx = i * Ny + j;
+            file << vvel[idx] << "\n";
+        }
+    }
+
+    for (int j = 0; j < Ny; ++j) {
+        for (int i = 0; i < Nx; ++i) {
+            int idx = i * Ny + j;
+            file << pressure[idx] << "\n";
+        }
+    }
+
+    for (int j = 0; j < Ny; ++j) {
+        for (int i = 0; i < Nx; ++i) {
+            int idx = i * Ny + j;
+            file << thermo[idx].T << "\n";
+        }
+    }
+
+    for (int j = 0; j < Ny; ++j) {
+        for (int i = 0; i < Nx; ++i) {
+            int idx = i * Ny + j;
+            file << thermo[idx].a << "\n";
+        }
+    }
+
+    for (int j = 0; j < Ny; ++j) {
+        for (int i = 0; i < Nx; ++i) {
+            int idx = i * Ny + j;
+            file << thermo[idx].e << "\n"; 
+        }
+    }
+
+
+    cout << "File created: " << filename << std::endl;
 }

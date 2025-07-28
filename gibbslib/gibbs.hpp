@@ -43,14 +43,16 @@ class Chemistry {
     bool safe_compute_molar_fractions();
     void compute_molar_fractions();
     void compute_equilibrium(); 
-    ThermoEntry compute_equilibrium_thermo_vars(double Rho, double E);
-    pair<Vector, Vector> compute_equilibrium_fractions(double Rho, double E); 
+
+
+    ThermoEntry compute_equilibrium_thermodynamic_variables(double Rho, double E);
+    pair<Vector, Vector> compute_equilibrium_concentrations(double Rho, double E); 
 
     // This functions are independant
     void write_thermochemical_table();
-    void plot_fractions();
-    void display_molar_fractions();
-    void display_mass_fractions(); 
-    void display_thermo_vars();
+    void plot_concentrations_for_e_range();
+    void print_molar_concentrations();
+    void print_mass_concentrations(); 
+    void print_thermodynamic_variables();
     
 }; 

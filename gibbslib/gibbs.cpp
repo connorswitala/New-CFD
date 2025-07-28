@@ -257,11 +257,11 @@ void Chemistry::compute_molar_fractions() {
                         X_new[i] = X[i] * exp(dx_safe);
 
                         if (isnan(X_new[i]) || isinf(X_new[i])) {
-                                throw std::runtime_error("Nonphysical molar fraction computed (NaN or Inf)");
+                                cout << "Nonphysical molar fraction computed (NaN or Inf)" << endl;
                         }
 
                         if (X_new[i] < 0) {
-                                throw std::runtime_error("Negative molar fraction computed");
+                                cout << "Negative molar fraction computed" << endl;
                         }
                 }
 
@@ -368,7 +368,7 @@ void Chemistry::compute_equilibrium() {
  *  four calculations are executed from a perturbed state in order to calculate the derivatives of pressure WRT density and 
  *  internal energy using a basic centered finite-differencing method. 
  */
-ThermoEntry Chemistry::compute_equilibrium_thermo_vars(double Rho, double E) {
+ThermoEntry Chemistry::compute_equilibrium_thermodynamic_variables(double Rho, double E) {
 
         rho = Rho;
         e = E;
@@ -378,6 +378,11 @@ ThermoEntry Chemistry::compute_equilibrium_thermo_vars(double Rho, double E) {
 
         compute_equilibrium();
         gam = 1 + R_mix / cv_mix;
+
+        thermo.rho = rho; thermo.e = e;
+        thermo.p = p; thermo.T = T;
+        thermo.R = R_mix, thermo.cv = cv_mix;
+        thermo.gamma = gam;
 
         //////  Compute derivatives ////
 
@@ -418,11 +423,8 @@ ThermoEntry Chemistry::compute_equilibrium_thermo_vars(double Rho, double E) {
         p2 = p;
         double dpdrho = (p1 - p2) / (2 * delta_rho); // dp/drho
 
-        thermo.rho = rho; thermo.e = e;
-        thermo.p = p; thermo.T = T;
-        thermo.R = R_mix, thermo.cv = cv_mix;
-        thermo.gamma = gam;
         thermo.dpdrho = dpdrho; thermo.dpde = dpde; 
+        thermo.a = sqrt(p / (rho * rho) * dpde  + dpdrho);
 
         return thermo;
 }
@@ -433,7 +435,7 @@ ThermoEntry Chemistry::compute_equilibrium_thermo_vars(double Rho, double E) {
  *  fractions and the second contains the molar fractions. The final entry of each vector also contains the computed
  *  equilibirum temperature. 
  */
-pair<Vector, Vector> Chemistry::compute_equilibrium_fractions(double Rho, double E) {
+pair<Vector, Vector> Chemistry::compute_equilibrium_concentrations(double Rho, double E) {
         
         rho = Rho;
         e = E;
@@ -476,14 +478,15 @@ void Chemistry::write_thermochemical_table() {
 
         Chemistry chem; 
         ofstream file("thermochemical_table.csv");
-        file << "rho, e, p, T, R, cv, gam, dpdrho, dpde" << endl;  
+        file << "rho, e, p, T, R, cv, gam, dpdrho, dpde, a" << endl;  
         ThermoEntry holder; 
 
         for (int i = 0; i < n; ++i) {
                 for (int j = 0; j < n; ++j) {
-                        holder = compute_equilibrium_thermo_vars(rho[i], e[j]);
+                        holder = compute_equilibrium_thermodynamic_variables(rho[i], e[j]);
                         file << holder.rho << ", " << holder.e << ", " << holder.p << ", " << holder.T << ", " << holder.R
-                                << ", " << holder.cv << ", " << holder.gamma << ", " << holder.dpdrho << ", " << holder.dpde << endl; 
+                                << ", " << holder.cv << ", " << holder.gamma << ", " << holder.dpdrho << ", " << holder.dpde 
+                                << ", " << holder.a << endl; 
                 }
                 cout << fixed << setprecision(4) << 100.0 * i * n / (n * n) << "% complete" << endl;
 
@@ -497,7 +500,7 @@ void Chemistry::write_thermochemical_table() {
  *  When you call this function is will create a .csv file for plotting in paraview that plots the mass and molar fractions of
  *  Each species against the equilibirum temperature until T_eq = 20,000 K. 
  */
-void Chemistry::plot_fractions() {
+void Chemistry::plot_concentrations_for_e_range() {
         double rho = 0.1, e;
         double T_eq = 600;
         Vector maf(11), mof(11); 
@@ -511,7 +514,7 @@ void Chemistry::plot_fractions() {
         int counter = 0;
         while (T_eq < 20000) {
                 e = 717 * 600 + 20000 * counter;
-                auto result = compute_equilibrium_fractions(rho, e);
+                auto result = compute_equilibrium_concentrations(rho, e);
                 maf = result.first;
                 mof = result.second; 
 
@@ -540,7 +543,7 @@ void Chemistry::plot_fractions() {
  *  compute_equilibirum_fractions(rho, e) returns a vector for the plot_fractions() function because it needs to iterate over many
  *  densities and internal energies.
  */
-void Chemistry::display_molar_fractions() {
+void Chemistry::print_molar_concentrations() {
         cout << "Molar Fractions: " << endl << endl;
         cout << "N2: " << Xk[0] << endl;
         cout << "O2: " << Xk[1] << endl;
@@ -553,7 +556,7 @@ void Chemistry::display_molar_fractions() {
         cout << "O+:  " << Xk[8] << endl;
         cout << "e-:  " << Xk[9] << endl;
 }
-void Chemistry::display_mass_fractions() {
+void Chemistry::print_mass_concentrations() {
         cout << "Mass Fractions: " << endl << endl;
         cout << "N2:  " << Yk[0] << endl;
         cout << "O2:  " << Yk[1] << endl;
@@ -576,7 +579,7 @@ void Chemistry::display_mass_fractions() {
  *  are stored in a member variables "thermo", but the function 'compute_equilibrium_thermo_vars(rho, e) returns a ThermoEntry 
  *  for the sake of creating the thermochemical table used in CFD simulations.
  */
-void Chemistry::display_thermo_vars() {
+void Chemistry::print_thermodynamic_variables() {
         cout << endl << "Thermochemical Variables: " << endl << endl;
         cout << setw(30) << "Density: " << thermo.rho << " kg/m^3\n";
         cout << setw(30) << "Internal energy: " << thermo.e << " J/kg\n";
@@ -587,4 +590,5 @@ void Chemistry::display_thermo_vars() {
         cout << setw(30) << "Mixture gamma: " << thermo.gamma << '\n';
         cout << setw(30) << "dp/drho: " << thermo.dpdrho << '\n';
         cout << setw(30) << "dp/de: " << thermo.dpde << '\n';
+        cout << setw(30) << "Sound speed: " << thermo.a << '\n';
 }

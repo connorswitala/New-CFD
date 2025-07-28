@@ -42,37 +42,11 @@ struct Point {
     Point(double x_val = 0.0, double y_val = 0.0) : x(x_val), y(y_val) {};
 };
 
-void primtocons(double* U, const double* V, const int dimensions);
-void constoprim(const double* U, double* V, const int dimensions);
+void primtocons(double* U, const double* V, double gam, const int dimensions);
+void constoprim(const double* U, double* V, double gam, const int dimensions);
 
-ThermoEntry operator+(const ThermoEntry& A, const ThermoEntry& B) {
-	ThermoEntry result;
-	result.rho = A.rho + B.rho;
-	result.e = A.e + B.e;
-	result.p = A.p + B.p;
-	result.T = A.T + B.T;
-	result.R = A.R + B.R;
-	result.cv = A.cv + B.cv;
-	result.gamma = A.gamma + B.gamma;
-	result.dpdrho = A.dpdrho + B.dpdrho;
-	result.dpde = A.dpde + B.dpde;
-    result.a = A.a + B.a;
-	return result;
-}
-ThermoEntry operator*(const double& s, const ThermoEntry& A) {
-	ThermoEntry result;
-	result.rho = s * A.rho;
-	result.e = s * A.e;
-	result.p = s * A.p;
-	result.T = s * A.T;
-	result.R = s * A.R;
-	result.cv = s * A.cv;
-	result.gamma = s * A.gamma;
-	result.dpdrho = s * A.dpdrho;
-	result.dpde = s * A.dpde;
-    result.a = S * A.a;
-	return result;
-}
+ThermoEntry operator+(const ThermoEntry& A, const ThermoEntry& B);
+ThermoEntry operator*(const double& s, const ThermoEntry& A);
 
 inline double computeInternalEnergy(const double* U, int n_vel) {
     double udotu = 0.0;
@@ -135,7 +109,7 @@ private:
     int Nx, Ny, N_cells, N_local;
     int num_cells, num_ifaces, num_jfaces, num_loc_cells, num_gathered_cells; 
     double CFL, dt, t, outer_res, inner_res;
-    string save_filename;
+    string filename;
 
     // CFD data structures
     Vector U, U_inlet, U_gathered, dU_old, dU_new, iEL, iER, jEB, jET, iFlux, jFlux, iPlus_A, iMinus_A, 
@@ -162,7 +136,7 @@ private:
 		iAreas,	jAreas, cellVolumes;
 
     // Intermediate data structures for math.
-    Vector A, B, C, F, v, g, alpha, rv1, rv2, rm1, rm2, I; 
+    Vector A, B, C, F, v, g, alpha, rv1, rv2, rm0, rm1, rm2, I; 
     
     BCMap BCs; 
 
@@ -170,28 +144,38 @@ public:
 
     int rank, size;
 
-    Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, bool real_gas, bool using_table); 
+    Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, bool real_gas, bool using_table, string filename); 
 
     void solve();
 
     void exchange_U_ghost_cells();
     void exchange_dU_ghost_cells(); 
-    void exchange_cell_thermo_ghost_cells();
     void form_inviscid_boundary_U(); 
     Vector get_U_values(BCType type, double* U_inner, double x_norm, double y_norm);
     void form_inviscid_boundary_E();
     Vector get_E_values(BCType type, double x_norm, double y_norm);
 
     void compute_dt();
-    void compute_inner_res();
-    void compute_outer_res();
+    void compute_inner_res_perf();
+    void compute_outer_res_perf();
+    void compute_inner_res_real();
+    void compute_outer_res_real();
+
 
     void compute_ifluxes();
     void compute_jfluxes(); 
     void compute_rho_fluxes(); 
-    void relax_left_line();
-    void relax_inner_lines(int i);
-    void relax_right_line(); 
+
+    void perf_line_relaxation(); 
+    void relax_left_line_perf();
+    void relax_inner_lines_perf(int i);
+    void relax_right_line_perf(); 
+
+    void real_line_relaxation(); 
+    void relax_left_line_real();
+    void relax_inner_lines_real(int i);
+    void relax_right_line_real(); 
+
     void update_U();
     void explicit_update();
     void finalize(); 
@@ -199,7 +183,7 @@ public:
     void print_by_rank(Vector Vec, int nx, int ny, int nvars, string name); 
     void create_ramp_grid(double L, double inlet_height, double ramp_angle);
 
-    void writeTecplotDat(const string& filename);
+    void writeTecplotDat();
 
     void initialize_chemistry(); 
     void get_real_chemistry();
