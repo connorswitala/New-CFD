@@ -1,18 +1,17 @@
 Starting solve!
-Iteration: 100	 Inner residual: 1.5721e-04	 Outer residual: 1.1680e+04	dt: 1.98685e-06
-	CFL:: 2.00000
-Iteration: 200	 Inner residual: 1.5728e-02	 Outer residual: 8.7449e+03	dt: 1.98685e-06
-	CFL:: 2.00000
-Iteration: 300	 Inner residual: 2.3578e-03	 Outer residual: 3.3559e+03	dt: 1.98685e-06
-	CFL:: 2.00000
-Iteration: 400	 Inner residual: 4.7720e-04	 Outer residual: 1.2325e+03	dt: 1.98685e-06
-	CFL:: 2.00000
-Iteration: 500	 Inner residual: 1.2508e-04	 Outer residual: 2.0448e+02	dt: 1.98685e-06
-	CFL:: 2.00000
-Iteration: 600	 Inner residual: 3.0426e-06	 Outer residual: 3.4612e+00	dt: 1.98685e-06
-	CFL:: 2.00000
-Iteration: 700	 Inner residual: 1.4180e-09	 Outer residual: 1.5108e-03	dt: 1.98685e-06
-	CFL:: 2.00000
-Elapsed time: 21.78335 seconds
-File created: TESTING_PLOT.dat
-Program finished!
+Iteration: 100	 Inner residual: 1.4856e-04	 Outer residual: 4.9196e+04	dt: 7.94739e-07	Elapsed time: 3.77117e+01 seconds.
+Iteration: 200	 Inner residual: 1.2166e-04	 Outer residual: 4.8035e+04	dt: 7.94739e-07	Elapsed time: 7.53260e+01 seconds.
+
+job aborted:
+[ranks] message
+
+[0] job terminated by the user
+
+[1-9] terminated
+
+---- error analysis -----
+
+[0] on DESKTOP
+ctrl-c was hit. job aborted by the user.
+
+---- error analysis -----

@@ -3,8 +3,8 @@
 
 int main(int argc, char* argv[]) {
 
-    int Nx = 400, Ny = 200;
-    double CFL = 2.0; 
+    int Nx = 200, Ny = 100;
+    double CFL = 1.0; 
 
 
     Vector V_inlet = {0.01, 4000, 0.0, 10000};
@@ -14,7 +14,9 @@ int main(int argc, char* argv[]) {
 
     MPI_Init(&argc, &argv);
 
-    Solver2D solver(Nx, Ny, CFL, U_inlet);
+    bool modelling_real_gas = false;
+    bool using_bilinear_interpolation = false; 
+    Solver2D solver(Nx, Ny, CFL, U_inlet, modelling_real_gas, using_bilinear_interpolation);
 
     solver.solve(); 
  

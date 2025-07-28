@@ -1,9 +1,13 @@
+#pragma once
+
 #include "../linalglib/linalg.hpp"
+#include "../gibbslib/gibbs.hpp" 
 #include <mpi.h>
 #include <fstream>
 #include <iomanip> 
 #include <cmath> 
 #include <memory>
+#include <algorithm>  // for std::upper_bound
 
 // Constant values for number of variables
 constexpr double perfgam = 1.4;
@@ -26,8 +30,9 @@ struct BCMap {
 	BCType bottom;
 	BCType top;
 
-	BCMap(BCType left, BCType right, BCType bottom, BCType top) : left(left), right(right), bottom(bottom), top(top) {}
 
+	BCMap(BCType left, BCType right, BCType bottom, BCType top) : left(left), right(right), bottom(bottom), top(top) {}
+    BCMap() : left(BCType::Undefined), right(BCType::Undefined), bottom(BCType::Undefined), top(BCType::Undefined) {}
 };
 
 struct Point {
@@ -37,10 +42,37 @@ struct Point {
     Point(double x_val = 0.0, double y_val = 0.0) : x(x_val), y(y_val) {};
 };
 
-
 void primtocons(double* U, const double* V, const int dimensions);
 void constoprim(const double* U, double* V, const int dimensions);
 
+ThermoEntry operator+(const ThermoEntry& A, const ThermoEntry& B) {
+	ThermoEntry result;
+	result.rho = A.rho + B.rho;
+	result.e = A.e + B.e;
+	result.p = A.p + B.p;
+	result.T = A.T + B.T;
+	result.R = A.R + B.R;
+	result.cv = A.cv + B.cv;
+	result.gamma = A.gamma + B.gamma;
+	result.dpdrho = A.dpdrho + B.dpdrho;
+	result.dpde = A.dpde + B.dpde;
+    result.a = A.a + B.a;
+	return result;
+}
+ThermoEntry operator*(const double& s, const ThermoEntry& A) {
+	ThermoEntry result;
+	result.rho = s * A.rho;
+	result.e = s * A.e;
+	result.p = s * A.p;
+	result.T = s * A.T;
+	result.R = s * A.R;
+	result.cv = s * A.cv;
+	result.gamma = s * A.gamma;
+	result.dpdrho = s * A.dpdrho;
+	result.dpde = s * A.dpde;
+    result.a = S * A.a;
+	return result;
+}
 
 inline double computeInternalEnergy(const double* U, int n_vel) {
     double udotu = 0.0;
@@ -49,21 +81,20 @@ inline double computeInternalEnergy(const double* U, int n_vel) {
 
     return U[n_vel + 1] / U[0] - 0.5 / (U[0] * U[0]) * udotu;   
 }
-inline double computePressure(const double* U, int n_vel) {
+inline double computePressure(const double* U, const double gam, int n_vel) {
     double udotu = 0.0;
     for (int i = 0; i < n_vel; ++i) 
         udotu += U[i + 1] * U[i + 1]; 
     
-    return (U[n_vel + 1] - 0.5 / U[0] * udotu) * (perfgam - 1);
+    return (U[n_vel + 1] - 0.5 / U[0] * udotu) * (gam - 1);
 }
-inline double compute_total_enthalpy(const double* V, int n_vel) {
+inline double compute_total_enthalpy(const double* V, const double gam, int n_vel) {
     double udotu = 0.0;
     for (int i = 0; i < n_vel; ++i) 
         udotu += V[i + 1] * V[i + 1];
     
-    return (V[n_vel + 1] / (perfgam - 1) + 0.5 * V[0] * udotu + V[n_vel + 1]) / V[0];
+    return (V[n_vel + 1] / (gam - 1) + 0.5 * V[0] * udotu + V[n_vel + 1]) / V[0];
 }
-
 
 class SodSolver1D { 
 private:
@@ -108,20 +139,29 @@ private:
 
     // CFD data structures
     Vector U, U_inlet, U_gathered, dU_old, dU_new, iEL, iER, jEB, jET, iFlux, jFlux, iPlus_A, iMinus_A, 
-        jPlus_A, jMinus_A, irho_A, jrho_A, V, V1, V2, Q, W, int1, int2, int3, UL, UR;
+        jPlus_A, jMinus_A, irho_A, jrho_A, irho_flux, jrho_flux, V, V1, V2, Q, W, int1, int2, int3, UL, UR;
     Vector local_Nx;
+    
+    // Thermochemical table data structures
+    double rho_inlet, e_inlet; 
+    bool real_gas, using_table;
+    vector<ThermoEntry> thermochemical_table;
+    vector<ThermoEntry> cell_thermo; 
+    Vector internal_energies, densities; 
+    Chemistry chem;  
     
     // Flux calculation data structures
     Vector Vi, Vii, Vj, Vjj, Vp, Vm, F_plus, F_minus;
 
-    // Grid data structures
+    // Grid data structures per rank
     Vector xCenter, yCenter, Volume, iFxNorm, iFyNorm, jFxNorm, jFyNorm, iArea, jArea;
     
+    // Entire grid data structures
     Vector x_vertices, y_vertices, x_cellCenters, y_cellCenters,
 		iface_xNormals,	iface_yNormals, jface_xNormals, jface_yNormals,
-		iAreas,	jAreas,
-		cellVolumes;
+		iAreas,	jAreas, cellVolumes;
 
+    // Intermediate data structures for math.
     Vector A, B, C, F, v, g, alpha, rv1, rv2, rm1, rm2, I; 
     
     BCMap BCs; 
@@ -130,12 +170,13 @@ public:
 
     int rank, size;
 
-    Solver2D(int Nx, int Ny, double CFL, Vector U_inlet); 
+    Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, bool real_gas, bool using_table); 
 
     void solve();
 
     void exchange_U_ghost_cells();
     void exchange_dU_ghost_cells(); 
+    void exchange_cell_thermo_ghost_cells();
     void form_inviscid_boundary_U(); 
     Vector get_U_values(BCType type, double* U_inner, double x_norm, double y_norm);
     void form_inviscid_boundary_E();
@@ -160,6 +201,13 @@ public:
 
     void writeTecplotDat(const string& filename);
 
+    void initialize_chemistry(); 
+    void get_real_chemistry();
+    void get_perf_chemistry();
+    void load_thermochemical_table(); 
+    ThermoEntry bilinear_interpolate(double rho, double e);
+
+    bool is_near_inlet_state(const double* U) const;
 
 
 };

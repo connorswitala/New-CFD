@@ -2,7 +2,7 @@
 
 
 // Conversion functions
-void primtocons(double* U, const double* V, const int dimensions) {
+void primtocons(double* U, const double* V, const double gam, const int dimensions) {
     
     U[0] = V[0]; // Set density
 
@@ -14,9 +14,9 @@ void primtocons(double* U, const double* V, const int dimensions) {
         udotu += V[i + 1] * V[i + 1];  
     }
 
-    U[dimensions + 1] = V[dimensions + 1] / (perfgam - 1) + 0.5 * V[0] * udotu; // Set total energy 
+    U[dimensions + 1] = V[dimensions + 1] / (gam - 1) + 0.5 * V[0] * udotu; // Set total energy 
 }
-void constoprim(const double* U, double* V, const int dimensions) {
+void constoprim(const double* U, double* V, const double gam, const int dimensions) {
     
     V[0] = U[0]; // Set density
 
@@ -28,7 +28,7 @@ void constoprim(const double* U, double* V, const int dimensions) {
         udotu += U[i + 1] * U[i + 1];
     }
 
-    V[dimensions + 1] = (U[dimensions + 1] - 0.5 / U[0] * udotu) * (perfgam - 1); // Set pressure
+    V[dimensions + 1] = (U[dimensions + 1] - 0.5 / U[0] * udotu) * (gam - 1); // Set pressure
 }
 
 
@@ -293,8 +293,8 @@ void SodSolver1D::solve() {
 //////// Solver2D Functions ////////
 ////////////////////////////////////
 
-Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet) : 
-    Nx(Nx), Ny(Ny), CFL(CFL), U_inlet(U_inlet), 
+Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, bool real_gas, bool using_table) : 
+    Nx(Nx), Ny(Ny), CFL(CFL), U_inlet(U_inlet), real_gas(real_gas), using_table(using_table),
     BCs(BCType::Inlet, BCType::Outlet, BCType::Symmetry, BCType::Symmetry) {
     
 
@@ -327,6 +327,8 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet) :
     // Important Flux Vectors
     iFlux = Vector( num_ifaces * n, 0.0);
     jFlux = Vector( num_jfaces * n, 0.0); 
+    irho_flux = Vector( num_ifaces * n, 0.0);
+    jrho_flux = Vector( num_jfaces * n, 0.0); 
 
     // Important Jacobians
     iPlus_A = Vector( num_ifaces * n * n, 0.0);
@@ -335,7 +337,6 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet) :
     jMinus_A = Vector( num_jfaces * n * n, 0.0);
     irho_A = Vector( num_ifaces * n * n, 0.0);
     jrho_A = Vector( num_jfaces * n * n, 0.0); 
-
 
     // For flux calculations:
     Vi = Vector(n); 
@@ -384,6 +385,7 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet) :
     int2 = Vector(n * n, 0.0);
     int3 = Vector(n * n, 0.0);
 
+    // This sets all cells to the inflow condition
     for (int i = 0; i < Nx_local + 2; ++i) {
         for (int j = 0; j < Ny + 2; ++j) {
             for (int k = 0; k < n; ++k) {
@@ -391,9 +393,38 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet) :
             }
         }
     }  
-    
-    form_inviscid_boundary_E(); 
-  
+
+    /**
+     *  Chemistry initialization
+     */
+
+    cell_thermo = vector<ThermoEntry>((Nx_local * 2) * (Ny + 2));
+    rho_inlet = U_inlet[0];
+    e_inlet = computeInternalEnergy(U_inlet.data(), n_vel); 
+
+    // This checks to see if you are solving a perfect gas EOS, or using Gibbs minimization.
+    if (real_gas) {
+
+        if (using_table) {
+
+            densities = Vector(500, 0.0);
+            internal_energies = Vector(500, 0.0); 
+
+            for (int i = 0; i < 500; ++i) {
+                    internal_energies[i] = 717 * 600 + (5e7 - 717 * 600) / (n - 1) * i;
+                    densities[i] = 1e-3 + (2 - 1e-3)/(n - 1) * i;
+            }
+
+            thermochemical_table = vector<ThermoEntry>(500 * 500); 
+            load_thermochemical_table(); 
+        }
+        else if (!using_table) {
+            Chemistry chem;
+        }
+    }
+
+    initialize_chemistry();
+    form_inviscid_boundary_E();   
 }
 
 
@@ -717,6 +748,62 @@ void Solver2D::exchange_dU_ghost_cells() {
     }
 
 }
+void Solver2D::exchange_cell_thermo_ghost_cells() {
+     MPI_Status status_left, status_right;
+
+    int col_size = (Ny + 2) * n; // Exchange all variables for entire column of Ny cells. 
+
+    Vector send_leftdU(col_size), recv_leftdU(col_size);
+    Vector send_rightdU(col_size), recv_rightdU(col_size);
+
+     for (int j = 0; j < Ny + 2; ++j) {
+        for (int k = 0; k < n; ++k) {
+
+            int local_left = (1 * (Ny + 2) + j) * n + k;
+            int local_right = (Nx_local * (Ny + 2) + j ) * n + k;
+
+            send_leftdU[j * n + k] = dU_old[local_left];
+            send_rightdU[j * n + k] = dU_old[local_right];
+        }
+    }
+
+
+    if (rank > 0) {
+        MPI_Sendrecv(send_leftdU.data(), col_size, MPI_DOUBLE, rank - 1, 0,
+                     recv_leftdU.data(), col_size, MPI_DOUBLE, rank - 1, 1,
+                     MPI_COMM_WORLD, &status_left);
+    }
+
+    if (rank < size - 1) {
+        MPI_Sendrecv(send_rightdU.data(), col_size, MPI_DOUBLE, rank + 1, 1,
+                     recv_rightdU.data(), col_size, MPI_DOUBLE, rank + 1, 0,
+                     MPI_COMM_WORLD, &status_right); 
+    }
+
+
+    /** This nested for loop takes the send and receive buffs and puts the data
+     * from it into the ghost cell spots for each rank. 
+     */
+
+    for (int j = 0; j < Ny + 2; ++j) {
+        for (int k = 0; k < n; ++k) {
+
+            if (rank > 0) {
+                int ghost_left =  j * n + k;
+                dU_old[ghost_left] = recv_leftdU[j * n + k];
+            }
+
+            if (rank < size - 1) {
+                int ghost_right = ((Nx_local + 1) * (Ny + 2) + j) * n + k;
+                dU_old[ghost_right] = recv_rightdU[j * n + k];
+            }
+
+        }
+    }
+
+}
+
+
 
 void Solver2D::solve() {
 
@@ -779,12 +866,15 @@ void Solver2D::solve() {
 
         counter++;
 
-        if (counter % 100 == 0) 
+        if (counter % 100 == 0) {
+            double end_time = MPI_Wtime();
             if (rank == 0) cout << "Iteration: " << counter
                 << "\t Inner residual: " << fixed << scientific << setprecision(4) << inner_res
                 << "\t Outer residual: " << fixed << scientific << setprecision(4) << outer_res
-                << "\tdt: " << fixed << scientific << setprecision(5) << dt << endl
-                << "\tCFL:: " << fixed << setprecision(5) << CFL << endl; 
+                << "\tdt: " << fixed << scientific << setprecision(5) << dt 
+                << "\tElapsed time: " << end_time - start_time << " seconds." << endl;
+        }
+        
         
         if (counter % 1000 == 0) {
             string filename = "DPLR TEST.dat";
@@ -817,6 +907,7 @@ void Solver2D::create_ramp_grid(double L, double inlet_height, double ramp_angle
     jAreas = Vector(Nx * (Ny + 1), 0.0),
     cellVolumes = Vector(Nx * Ny, 0.0);
 
+    BCs = BCMap(BCType::Inlet, BCType::Outlet, BCType::Symmetry, BCType::Symmetry);
 
     if (rank == 0) {
         int i,j;
@@ -824,7 +915,6 @@ void Solver2D::create_ramp_grid(double L, double inlet_height, double ramp_angle
         double theta_rad = ramp_angle * 3.141592653 / 180.0;
         double slope = tan(theta_rad);
         double ramp_start_x = L / 3.0;
-        double ramp_start_y = 0.0; 
         double ramp_end_x = 2.0 * L / 3.0;
         double ramp_length = ramp_end_x - ramp_start_x;
         double ramp_end_y = slope * ramp_length;  // height at end of ramp
@@ -1051,12 +1141,14 @@ void Solver2D::create_ramp_grid(double L, double inlet_height, double ramp_angle
 
 } 
 
-
 void Solver2D::compute_ifluxes() {
 
     int ci, cii, fi; 
     double weight, pi, pii, dp, nx, ny, rho, u, v, p, ho, uprime, a, lp, lm, l, lt, lc;  
-    double g = 5.72, pe = perfgam - 1; 
+    ThermoEntry CTi, CTii, CTp, CTm;
+    double g = 5.72;
+    double pe, pp, up_half, p_half, rho_half, dpdrho_half; 
+    Vector U_half(4), Ui(4), Uii(4);  
     // cout << "I FLUXES:" << endl; 
 
     for (int i = 0; i < Nx_local + 1; ++i) {
@@ -1069,17 +1161,44 @@ void Solver2D::compute_ifluxes() {
             nx = iFxNorm[fi];
             ny = iFyNorm[fi]; 
 
-            constoprim(&U[ci * n], Vi.data(), n_vel);
-            constoprim(&U[cii * n], Vii.data(), n_vel);  
+            for (int k = 0; k < n; ++k) {
+                Ui[k] = U[ci * n + k];
+                Uii[k] = U[cii * n + k];
+                U_half[k] = 0.5 * (Ui[k] + Uii[k]);
+            }
 
-            pi = Vi[3];
-            pii = Vii[3]; 
+            CTi = cell_thermo[ci];
+            CTii = cell_thermo[cii];
+
+            constoprim(Ui.data(), Vi.data(), CTi.gamma, n_vel);
+            constoprim(Uii.data(), Vii.data(), CTii.gamma, n_vel);  
+
+            pi = CTi.p;
+            pii = CTii.p; 
             dp = fabs(pii - pi)/ min(pi, pii);
-            weight = 1;
+            weight = 1 - 0.5 / ((g * g * dp * dp) + 1);
+
+            CTp = weight * CTi + (1 - weight) * CTii;
+            CTm = (1 - weight) * CTi + weight * CTii;
 
             for (int k = 0; k < n; ++k) {
                 Vp[k] = weight * Vi[k] + (1 - weight) * Vii[k];
                 Vm[k] = (1 - weight) * Vi[k] + weight * Vii[k];
+            }
+
+            // Compute i_rhoA 
+            if (real_gas) {
+
+                up_half = (0.5 * Ui[1] / Ui[0] + 0.5 * Uii[1] / Uii[0]) * nx + (0.5 * Ui[2] / Ui[0] + 0.5 * Uii[2] / Uii[0]) * ny;
+                p_half = 0.5 * (pi + pii); 
+                rho_half = 0.5 * (Ui[0] + Uii[0]);
+                dpdrho_half = 0.5 * (CTi.dpdrho + CTii.dpdrho);
+                
+                irho_A[fi * n * n + 4] = (dpdrho_half - p_half / rho_half) * nx;
+                irho_A[fi * n * n + 8] = (dpdrho_half - p_half / rho_half) * ny;
+                irho_A[fi * n * n + 12] = (dpdrho_half - p_half / rho_half) * up_half;
+
+                matvec_mult(&irho_A[fi * n * n], U_half.data(), &irho_flux[fi * n], n);
             }
 
             // Positive flux calculation
@@ -1088,8 +1207,10 @@ void Solver2D::compute_ifluxes() {
             u = Vp[1];
             v = Vp[2];
             p = Vp[3]; 
-            a = sqrt(perfgam * p / rho);  
-            ho = compute_total_enthalpy(Vp.data(), n_vel);
+            a = CTp.a;   
+            ho = compute_total_enthalpy(Vp.data(), CTp.gamma, n_vel);
+            pp = CTp.dpdrho - CTp.e / rho * CTp.dpde + 0.5 * (Vp[1] * Vp[1] + Vp[2] * Vp[2]) / rho * CTp.dpde; 
+            pe = 1 / rho * CTp.dpde; 
 
             uprime = u * nx + v * ny; 
 
@@ -1103,7 +1224,7 @@ void Solver2D::compute_ifluxes() {
             for (int k = 0; k < n; ++k) int1[k * n + k] = l;
 
             V1 = {lc / (a * a), (u * lc + a * nx * lt)/(a * a), (v * lc + a * ny * lt)/(a * a), (ho * lc + a * uprime * lt) / (a * a)};
-            Q = {0.5 * (u * u + v * v) * (perfgam - 1), -u * pe, -v * pe, pe};
+            Q = {pp, -u * pe, -v * pe, pe};
 
             V2 = {lt / a, u * lt / a + nx * lc, v * lt / a + ny * lc, ho * lt / a + uprime * lc};
             W = {-uprime, nx, ny, 0}; 
@@ -1122,8 +1243,10 @@ void Solver2D::compute_ifluxes() {
             u = Vm[1];
             v = Vm[2];
             p = Vm[3]; 
-            a = sqrt(perfgam * p / rho);  
-            ho = compute_total_enthalpy(Vm.data(), n_vel);
+            a = CTm.a;   
+            ho = compute_total_enthalpy(Vm.data(), CTm.gamma, n_vel);
+            pp = CTm.dpdrho - CTm.e / rho * CTm.dpde + 0.5 * (Vm[1] * Vm[1] + Vm[2] * Vm[2]) / rho * CTm.dpde; 
+            pe = 1 / rho * CTm.dpde; 
 
             uprime = u * nx + v * ny; 
 
@@ -1137,7 +1260,7 @@ void Solver2D::compute_ifluxes() {
             for (int k = 0; k < n; ++k) int1[k * n + k] = l;
 
             V1 = {lc / (a * a), (u * lc + a * nx * lt)/(a * a), (v * lc + a * ny * lt)/(a * a), (ho * lc + a * uprime * lt) / (a * a)};
-            Q = {0.5 * (u * u + v * v) * (perfgam - 1), -u * pe, -v * pe, pe};
+            Q = {pp, -u * pe, -v * pe, pe};
 
             V2 = {lt / a, u * lt / a + nx * lc, v * lt / a + ny * lc, ho * lt / a + uprime * lc};
             W = {-uprime, nx, ny, 0}; 
@@ -1164,7 +1287,10 @@ void Solver2D::compute_jfluxes() {
 
     int cj, cjj, fj; 
     double weight, pj, pjj, dp, nx, ny, rho, u, v, p, ho, uprime, a, lp, lm, l, lt, lc;  
-    double g = 5.72, pe = perfgam - 1; 
+    Vector Uj(4), Ujj(4), U_half(4);
+    ThermoEntry CTj, CTjj, CTp, CTm;
+    double pe, pp, up_half, p_half, rho_half, dpdrho_half; 
+    double g = 5.72;
     // cout << "J FLUXES: " << endl; 
 
     for (int i = 0; i < Nx_local; ++i) {
@@ -1177,17 +1303,44 @@ void Solver2D::compute_jfluxes() {
             nx = jFxNorm[fj];
             ny = jFyNorm[fj];  
 
-            constoprim(&U[cj * n], Vj.data(), n_vel);
-            constoprim(&U[cjj * n], Vjj.data(), n_vel);   
+            for (int k = 0; k < n; ++k) {
+                Uj[k] = U[cj * n + k];
+                Ujj[k] = U[cjj * n + k];
+                U_half[k] = 0.5 * (Uj[k] + Ujj[k]);
+            }
 
-            pj = Vj[3];
-            pjj = Vjj[3]; 
+            CTj = cell_thermo[cj];
+            CTjj = cell_thermo[cjj];
+
+            constoprim(&U[cj * n], Vj.data(), CTj.gamma, n_vel);
+            constoprim(&U[cjj * n], Vjj.data(), CTjj.gamma, n_vel);   
+
+            pj = CTj.p;
+            pjj = CTjj.p; 
             dp = fabs(pjj - pj)/ min(pj, pjj); 
-            weight = 1;
+            weight = 1 - 0.5 / ((g * g * dp * dp) + 1);
+
+            CTp = weight * CTj + (1 - weight) * CTjj;
+            CTm = (1 - weight) * CTj + weight * CTjj;
 
             for (int k = 0; k < n; ++k) {
                 Vp[k] = weight * Vj[k] + (1 - weight) * Vjj[k];
                 Vm[k] = (1 - weight) * Vj[k] + weight * Vjj[k];
+            }
+
+            // Compute i_rhoA 
+            if (real_gas) {
+
+                up_half = (0.5 * Uj[1] / Uj[0] + 0.5 * Ujj[1] / Ujj[0]) * nx + (0.5 * Uj[2] / Uj[0] + 0.5 * Ujj[2] / Ujj[0]) * ny;
+                p_half = 0.5 * (pj + pjj); 
+                rho_half = 0.5 * (Uj[0] + Ujj[0]);
+                dpdrho_half = 0.5 * (CTj.dpdrho + CTjj.dpdrho); 
+                
+                jrho_A[fj * n * n + 4] = (dpdrho_half - p_half / rho_half) * nx;
+                jrho_A[fj * n * n + 8] = (dpdrho_half - p_half / rho_half) * ny;
+                jrho_A[fj * n * n + 12] = (dpdrho_half - p_half / rho_half) * up_half;
+
+                matvec_mult(&jrho_A[fj * n * n], U_half.data(), &jrho_flux[fj * n], n);
             }
 
             // Positive flux calculation
@@ -1196,8 +1349,10 @@ void Solver2D::compute_jfluxes() {
             u = Vp[1];
             v = Vp[2];
             p = Vp[3]; 
-            a = sqrt(perfgam * p / rho);  
-            ho = compute_total_enthalpy(Vp.data(), n_vel); 
+            a = CTp.a;   
+            ho = compute_total_enthalpy(Vp.data(), CTp.gamma, n_vel);
+            pp = CTp.dpdrho - CTp.e / rho * CTp.dpde + 0.5 * (Vp[1] * Vp[1] + Vp[2] * Vp[2]) / rho * CTp.dpde; 
+            pe = 1 / rho * CTp.dpde; 
 
             uprime = u * nx + v * ny; 
 
@@ -1211,7 +1366,7 @@ void Solver2D::compute_jfluxes() {
             for (int k = 0; k < n; ++k) int1[k * n + k] = l;
 
             V1 = {lc / (a * a), (u * lc + a * nx * lt)/(a * a), (v * lc + a * ny * lt)/(a * a), (ho * lc + a * uprime * lt) / (a * a)};
-            Q = {0.5 * (u * u + v * v) * (perfgam - 1), -u * pe, -v * pe, pe};
+            Q = {pp, -u * pe, -v * pe, pe};
 
             V2 = {lt / a, u * lt / a + nx * lc, v * lt / a + ny * lc, ho * lt / a + uprime * lc};
             W = {-uprime, nx, ny, 0}; 
@@ -1230,8 +1385,10 @@ void Solver2D::compute_jfluxes() {
             u = Vm[1];
             v = Vm[2];
             p = Vm[3]; 
-            a = sqrt(perfgam * p / rho);  
-            ho = compute_total_enthalpy(Vm.data(), n_vel);
+            a = CTm.a;   
+            ho = compute_total_enthalpy(Vm.data(), CTm.gamma, n_vel);
+            pp = CTm.dpdrho - CTm.e / rho * CTm.dpde + 0.5 * (Vm[1] * Vm[1] + Vm[2] * Vm[2]) / rho * CTm.dpde; 
+            pe = 1 / rho * CTm.dpde; 
 
             uprime = u * nx + v * ny; 
 
@@ -1948,4 +2105,242 @@ void Solver2D::finalize() {
     if (rank == 0) cout << "Program finished!" << endl; 
 
 
+}
+
+void Solver2D::load_thermochemical_table() {
+    constexpr int N = 500;
+
+    string filename = "../gibbslib/thermochemical_table.csv";
+    ifstream file(filename); 
+
+    if (!file.is_open()) {
+        cerr << "Error: could not open " << filename << "\n";
+        return;
+    }
+
+    string line;
+    getline(file, line); // skip header
+
+    // Resize table and coordinate vectors
+    thermochemical_table.resize(N * N);
+    densities.resize(N);
+    internal_energies.resize(N);
+
+    int count = 0;
+
+    for (int i = 0; i < N; ++i) {
+        for (int j = 0; j < N; ++j) {
+            if (!getline(file, line)) {
+                cerr << "Error: unexpected end of file at entry " << count << "\n";
+                return;
+            }
+
+            stringstream ss(line);
+            string token;
+            ThermoEntry entry;
+
+            auto read = [&](double& val) {
+                if (!getline(ss, token, ',')) {
+                    cerr << "Error: malformed line at entry " << count << "\n";
+                    return false;
+                }
+                val = stod(token);
+                return true;
+            };
+
+            if (!read(entry.rho)    || !read(entry.e)    || !read(entry.p) ||
+                !read(entry.T)      || !read(entry.R)    || !read(entry.cv) ||
+                !read(entry.gamma)  || !read(entry.dpdrho) || !getline(ss, token)) {
+                cerr << "Error: incomplete or bad format at entry " << count << "\n";
+                return;
+            }
+
+            entry.dpde = stod(token); // last field, no comma
+
+            thermochemical_table[i * N + j] = entry;
+
+            if (j == 0) densities[i] = entry.rho;
+            if (i == 0) internal_energies[j] = entry.e;
+
+            ++count;
+        }
+    }
+
+    cout << "Successfully loaded " << count << " thermochemical entries.\n";
+}
+ThermoEntry Solver2D::bilinear_interpolate(double rho, double e) {
+    constexpr int N = 500;
+
+    // Return default entry if out of bounds
+    if (rho < densities.front() || rho > densities.back() ||
+        e   < internal_energies.front() || e > internal_energies.back()) {
+        cerr << "Warning: interpolation input (rho=" << rho << ", e=" << e << ") out of bounds.\n";
+        return ThermoEntry{};
+    }
+
+    // Locate bounding indices
+    auto it_rho = upper_bound(densities.begin(), densities.end(), rho);
+    int i = max(0, int(it_rho - densities.begin()) - 1);
+    i = min(i, N - 2);
+
+    auto it_e = upper_bound(internal_energies.begin(), internal_energies.end(), e);
+    int j = max(0, int(it_e - internal_energies.begin()) - 1);
+    j = min(j, N - 2);
+
+    double x1 = densities[i],     x2 = densities[i+1];
+    double y1 = internal_energies[j], y2 = internal_energies[j+1];
+
+    double x = rho;
+    double y = e;
+
+    const ThermoEntry& Q11 = thermochemical_table[i * N + j];
+    const ThermoEntry& Q21 = thermochemical_table[(i+1) * N + j];
+    const ThermoEntry& Q12 = thermochemical_table[i * N + (j+1)];
+    const ThermoEntry& Q22 = thermochemical_table[(i+1) * N + (j+1)];
+
+    auto bilinear = [&](double f11, double f21, double f12, double f22) -> double {
+        double dx = x2 - x1;
+        double dy = y2 - y1;
+
+        if (dx == 0 || dy == 0)
+            return f11; // fallback: degenerate grid spacing
+
+        double t = (x - x1) / dx;
+        double u = (y - y1) / dy;
+
+        return (1 - t) * (1 - u) * f11 +
+               t       * (1 - u) * f21 +
+               (1 - t) * u       * f12 +
+               t       * u       * f22;
+    };
+
+    ThermoEntry result;
+    result.rho    = rho;
+    result.e      = e;
+    result.p      = bilinear(Q11.p, Q21.p, Q12.p, Q22.p);
+    result.T      = bilinear(Q11.T, Q21.T, Q12.T, Q22.T);
+    result.R      = bilinear(Q11.R, Q21.R, Q12.R, Q22.R);
+    result.cv     = bilinear(Q11.cv, Q21.cv, Q12.cv, Q22.cv);
+    result.gamma  = bilinear(Q11.gamma, Q21.gamma, Q12.gamma, Q22.gamma);
+    result.dpdrho = bilinear(Q11.dpdrho, Q21.dpdrho, Q12.dpdrho, Q22.dpdrho);
+    result.dpde   = bilinear(Q11.dpde, Q21.dpde, Q12.dpde, Q22.dpde);
+
+    return result;
+}
+
+void Solver2D::initialize_chemistry() {
+    if (real_gas) {
+
+        ThermoEntry holder;
+        double density, energy; 
+
+            for (int i = 0; i < Nx_local + 2; ++i) {
+                for (int j = 0; j < Ny + 2; ++j) {
+
+                    int idx = (i * (Ny + 2) + j) * n;
+                    density = U[idx];
+                    energy =  computeInternalEnergy(&U[idx], n_vel);
+
+                    if (using_table) {         
+                        holder = bilinear_interpolate(density, energy);                     
+                    }
+                    else {                    
+                        holder = chem.compute_equilibrium_thermo_vars(density, energy); 
+                    }
+
+                    cell_thermo[i * (Ny + 2) + j] = holder;
+                    cell_thermo[i * (Ny + 2) + j].a = sqrt(cell_thermo[idx].p / (cell_thermo[idx].rho * cell_thermo[idx].rho) * cell_thermo[idx].dpde + cell_thermo[idx].rho);
+                    
+
+                }
+            }
+
+    }       
+    else {
+
+        for (int i = 0; i < Nx_local + 2; ++i) {
+            for (int j = 0; j < Ny + 2; ++j) {
+                int idx = i * (Ny + 2) + j;
+
+                if (is_near_inlet_state(&U[idx * n]))
+                    continue;
+
+                cell_thermo[idx].rho = U[idx * n];
+                cell_thermo[idx].e = computeInternalEnergy(&U[idx * n], n_vel);
+                cell_thermo[idx].p = computePressure(&U[idx * n], n_vel);
+                cell_thermo[idx].R = 287.0;
+                cell_thermo[idx].cv = 717.0;
+                cell_thermo[idx].gamma = perfgam;
+                cell_thermo[idx].dpdrho = (perfgam - 1) * cell_thermo[idx].e;
+                cell_thermo[idx].dpde = (perfgam - 1) * cell_thermo[idx].rho;
+                cell_thermo[idx].a = sqrt(perfgam * cell_thermo[idx].p / cell_thermo[idx].rho);
+
+            }
+        }
+
+    }
+}
+
+void Solver2D::get_real_chemistry() {
+
+    ThermoEntry holder;
+    double density, energy; 
+
+        for (int i = 0; i < Nx_local + 2; ++i) {
+            for (int j = 0; j < Ny + 2; ++j) {
+                int idx = (i * (Ny + 2) + j) * n;
+                density = U[idx];
+                energy =  computeInternalEnergy(&U[idx], n_vel);
+
+                if (is_near_inlet_state(&U[idx]))
+                    continue;
+
+                if (using_table) {         
+                    holder = bilinear_interpolate(density, energy);                     
+                }
+                else {                    
+                    holder = chem.compute_equilibrium_thermo_vars(density, energy); 
+                }
+
+                cell_thermo[i * (Ny + 2) + j] = holder;
+                cell_thermo[i * (Ny + 2) + j].a = sqrt(cell_thermo[idx].p / (cell_thermo[idx].rho * cell_thermo[idx].rho) * cell_thermo[idx].dpde + cell_thermo[idx].rho);
+                
+
+            }
+        }
+
+}
+void Solver2D::get_perf_chemistry() {
+
+        for (int i = 0; i < Nx_local + 2; ++i) {
+            for (int j = 0; j < Ny + 2; ++j) {
+                int idx = i * (Ny + 2) + j;
+
+                cell_thermo[idx].rho = U[idx * n];
+                cell_thermo[idx].e = computeInternalEnergy(&U[idx * n], n_vel);
+                cell_thermo[idx].p = computePressure(&U[idx * n], n_vel);
+                cell_thermo[idx].R = 287.0;
+                cell_thermo[idx].cv = 717.0;
+                cell_thermo[idx].gamma = perfgam;
+                cell_thermo[idx].dpdrho = (perfgam - 1) * cell_thermo[idx].e;
+                cell_thermo[idx].dpde = (perfgam - 1) * cell_thermo[idx].rho;
+                cell_thermo[idx].a = sqrt(perfgam * cell_thermo[idx].p / cell_thermo[idx].rho);
+
+            }
+        }
+}
+
+bool Solver2D::is_near_inlet_state(const double* U) const {
+    const double rho = U[0];
+    const double u = U[1] / rho;
+    const double v = U[2] / rho;
+    const double rho_E = U[3];
+    const double e = rho_E / rho - 0.5 * (u*u + v*v);
+
+    const double rel_tol = 0.2; // ±20%
+
+    const bool rho_ok = fabs(rho - rho_inlet) / rho_inlet <= rel_tol;
+    const bool e_ok   = fabs(e   - e_inlet)   / e_inlet   <= rel_tol;
+
+    return rho_ok && e_ok;
 }
