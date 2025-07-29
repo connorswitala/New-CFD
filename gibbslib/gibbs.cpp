@@ -473,7 +473,7 @@ void Chemistry::write_thermochemical_table() {
         Vector e(n), rho(n); 
         for (int i = 0; i < n; ++i) {
                 e[i] = 717 * 600 + (5e7 - 717 * 600) / (n - 1) * i;
-                rho[i] = 1e-3 + (2 - 1e-3)/(n - 1) * i;
+                rho[i] = 5e-5 + (1 - 5e-5)/(n - 1) * i;
         }
 
         Chemistry chem; 

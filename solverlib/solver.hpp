@@ -117,7 +117,6 @@ private:
     Vector local_Nx;
     
     // Thermochemical table data structures
-    double rho_inlet, e_inlet; 
     bool real_gas, using_table;
     vector<ThermoEntry> thermochemical_table;
     vector<ThermoEntry> cell_thermo; 
@@ -184,6 +183,7 @@ public:
     void create_ramp_grid(double L, double inlet_height, double ramp_angle);
 
     void writeTecplotDat();
+    void writeParaviewCSV(); 
 
     void initialize_chemistry(); 
     void get_real_chemistry();
