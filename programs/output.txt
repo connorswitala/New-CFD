@@ -1,7 +1,16 @@
 Chemistry initialized
 Starting solve!
-Solving finished!
-Elapsed time: 7.72049 seconds
-Writing file...
-Outside of thermo loop
-CSV file written for ParaView: ../plotfiles/real_gas_table_ramp.csv
+
+job aborted:
+[ranks] message
+
+[0] job terminated by the user
+
+[1-7] terminated
+
+---- error analysis -----
+
+[0] on DESKTOP
+ctrl-c was hit. job aborted by the user.
+
+---- error analysis -----

@@ -822,7 +822,7 @@ void Solver2D::solve() {
 
         counter++;
 
-        if (counter % 25 == 0) {
+        if (counter % 1 == 0) {
             double end_time = MPI_Wtime();
             if (rank == 0) { 
                 cout << "Iteration: " << counter

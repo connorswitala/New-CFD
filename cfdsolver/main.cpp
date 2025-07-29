@@ -5,7 +5,7 @@ int main(int argc, char* argv[]) {
 
     
     int Nx = 200, Ny = 100;
-    double CFL = 2.0; 
+    double CFL = 1.0; 
 
     double Mach = 20;
     double a = 329.799;
@@ -21,7 +21,7 @@ int main(int argc, char* argv[]) {
 
     bool modelling_real_gas = true;
     bool using_bilinear_interpolation = false; 
-    string filename = "../plotfiles/real_gas_table_ramp.csv";
+    string filename = "../plotfiles/real_gas_coupled_ramp.csv";
 
     Solver2D solver(Nx, Ny, CFL, U_inlet, modelling_real_gas, using_bilinear_interpolation, filename);
     
