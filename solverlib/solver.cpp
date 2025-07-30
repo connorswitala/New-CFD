@@ -322,8 +322,8 @@ void SodSolver1D::solve() {
 //////// Solver2D Functions ////////
 ////////////////////////////////////
 
-Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, bool real_gas, bool using_table, string filename) : 
-    Nx(Nx), Ny(Ny), CFL(CFL), U_inlet(U_inlet), real_gas(real_gas), using_table(using_table), filename(filename),
+Solver2D::Solver2D(int Nx, int Ny, Vector CFL_vec, vector<int> CFL_timesteps, Vector U_inlet, bool real_gas, bool using_table, string filename) : 
+    Nx(Nx), Ny(Ny), CFL_vec(CFL_vec), CFL_timesteps(CFL_timesteps), U_inlet(U_inlet), real_gas(real_gas), using_table(using_table), filename(filename),
     BCs(BCType::Inlet, BCType::Outlet, BCType::Symmetry, BCType::Symmetry) {
     
 
@@ -333,6 +333,7 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, bool real_gas, bo
     t = 0.0; 
     inner_res = 1.0;
     outer_res = 1.0;
+    CFL = 1.0;
 
     /** 
      *      local_Nx(size) creates a vector that holds how many columns each rank gets. This is important 
@@ -346,7 +347,7 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, bool real_gas, bo
      */
 
 
-    create_ramp_grid(3, 0.75, 15); 
+    create_ramp_grid(3, 0.75, 20); 
 
     U_gathered = Vector( num_gathered_cells * n, 0.0); 
     U = Vector((Nx_local + 2) * (Ny + 2) * n, 0.0);  
@@ -438,9 +439,9 @@ Solver2D::Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, bool real_gas, bo
             densities = Vector(500, 0.0);
             internal_energies = Vector(500, 0.0); 
 
-            for (int i = 0; i < n; ++i) {
-                densities[i] = 717 * 600 + (5e7 - 717 * 600) / (n - 1) * i;
-                internal_energies[i] = 5e-5 + (1 - 5e-5)/(n - 1) * i;
+            for (int i = 0; i < 500; ++i) {
+                internal_energies[i] = 717 * 600 + (5e7 - 717 * 600) / (500 - 1) * i;
+                densities[i] = 5e-5 + (1 - 5e-5)/(500 - 1) * i;
             }
 
             thermochemical_table = vector<ThermoEntry>(500 * 500); 
@@ -786,9 +787,16 @@ void Solver2D::solve() {
     double start_time = MPI_Wtime();
 
     if (rank == 0) cout << "Starting solve!" << endl;
-    int counter = 0;    
+    int counter = 0;   
+    int num = 0; 
+    CFL = 1.0;
 
     while (outer_res > 1e-6) {
+
+        if (counter == CFL_timesteps[num]) {
+            CFL = CFL_vec[num];
+            num++;
+        }
 
         exchange_U_ghost_cells(); 
 
@@ -822,16 +830,20 @@ void Solver2D::solve() {
 
         counter++;
 
-        if (counter % 1 == 0) {
+        if (counter % 50 == 0) {
             double end_time = MPI_Wtime();
             if (rank == 0) { 
                 cout << "Iteration: " << counter
                 << "\t Inner residual: " << fixed << scientific << setprecision(4) << inner_res
                 << "\t Outer residual: " << fixed << scientific << setprecision(4) << outer_res
                 << "\tdt: " << fixed << scientific << setprecision(5) << dt 
+                << "\tCFL: " << fixed << scientific << setprecision(3) << CFL 
                 << "\tElapsed time: " << end_time - start_time << " seconds." << endl;
             }
         }        
+
+        if (counter % 500 == 0)
+            finalize();
 
     }    
 
@@ -1158,7 +1170,8 @@ void Solver2D::compute_ifluxes() {
             rho = Vp[0];
             u = Vp[1];
             v = Vp[2];
-            p = Vp[3]; 
+            V[3] = CTp.p;
+            p = CTp.p;  
             a = CTp.a;   
             ho = compute_total_enthalpy(Vp.data(), CTp.gamma, n_vel);
             pp = CTp.dpdrho - CTp.e / rho * CTp.dpde + 0.5 * (Vp[1] * Vp[1] + Vp[2] * Vp[2]) / rho * CTp.dpde; 
@@ -1194,7 +1207,8 @@ void Solver2D::compute_ifluxes() {
             rho = Vm[0];
             u = Vm[1];
             v = Vm[2];
-            p = Vm[3]; 
+            Vm[3] = CTm.p;
+            p = CTm.p; 
             a = CTm.a;   
             ho = compute_total_enthalpy(Vm.data(), CTm.gamma, n_vel);
             pp = CTm.dpdrho - CTm.e / rho * CTm.dpde + 0.5 * (Vm[1] * Vm[1] + Vm[2] * Vm[2]) / rho * CTm.dpde; 
@@ -1300,6 +1314,7 @@ void Solver2D::compute_jfluxes() {
             rho = Vp[0];
             u = Vp[1];
             v = Vp[2];
+            V[3] = CTp.p;
             p = Vp[3]; 
             a = CTp.a;   
             ho = compute_total_enthalpy(Vp.data(), CTp.gamma, n_vel);
@@ -1336,6 +1351,7 @@ void Solver2D::compute_jfluxes() {
             rho = Vm[0];
             u = Vm[1];
             v = Vm[2];
+            V[3] = CTm.p;
             p = Vm[3]; 
             a = CTm.a;   
             ho = compute_total_enthalpy(Vm.data(), CTm.gamma, n_vel);
@@ -1354,7 +1370,7 @@ void Solver2D::compute_jfluxes() {
             for (int k = 0; k < n; ++k) int1[k * n + k] = l;
 
             V1 = {lc / (a * a), (u * lc + a * nx * lt)/(a * a), (v * lc + a * ny * lt)/(a * a), (ho * lc + a * uprime * lt) / (a * a)};
-            Q = {0.5 * (u * u + v * v) * (perfgam - 1), -u * pe, -v * pe, pe};
+            Q = {pp, -u * pe, -v * pe, pe};
 
             V2 = {lt / a, u * lt / a + nx * lc, v * lt / a + ny * lc, ho * lt / a + uprime * lc};
             W = {-uprime, nx, ny, 0}; 
@@ -2641,7 +2657,7 @@ void Solver2D::finalize() {
         0, MPI_COMM_WORLD
     );        
 
-    writeParaviewCSV(); 
+    writeTecplotDat(); 
 }
 
 void Solver2D::load_thermochemical_table() {
@@ -2755,7 +2771,7 @@ ThermoEntry Solver2D::bilinear_interpolate(double rho, double e) {
     result.gamma  = bilinear(Q11.gamma, Q21.gamma, Q12.gamma, Q22.gamma);
     result.dpdrho = bilinear(Q11.dpdrho, Q21.dpdrho, Q12.dpdrho, Q22.dpdrho);
     result.dpde   = bilinear(Q11.dpde, Q21.dpde, Q12.dpde, Q22.dpde);
-    result.a   = bilinear(Q11.a, Q21.a, Q12.a, Q22.a);
+    result.a      = bilinear(Q11.a, Q21.a, Q12.a, Q22.a);
 
     return result;
 }
@@ -2891,14 +2907,29 @@ void Solver2D::writeTecplotDat() {
             for (int j = 0; j < Ny; ++j) {
                 int idx = i * Ny + j;
 
-                double density = U_gathered[idx];
-                double energy =  computeInternalEnergy(&U_gathered[idx], n_vel);
+                double density = U_gathered[idx * n];
+                double energy =  computeInternalEnergy(&U_gathered[idx * n], n_vel);
 
-                if (using_table == false) {
-                    thermo[idx] = chem.compute_equilibrium_thermodynamic_variables(density, energy);
+                if (energy < 717 * 600) {
+
+                    thermo[idx].rho = U_gathered[idx * n];
+                    thermo[idx].e = computeInternalEnergy(&U_gathered[idx * n], n_vel);
+                    thermo[idx].p = computePressure(&U_gathered[idx * n], perfgam, n_vel);
+                    thermo[idx].R = 287.0;
+                    thermo[idx].T = thermo[idx].p / (thermo[idx].rho * thermo[idx].R);
+                    thermo[idx].cv = 717.0;
+                    thermo[idx].gamma = perfgam;
+                    thermo[idx].dpdrho = (perfgam - 1) * thermo[idx].e;
+                    thermo[idx].dpde = (perfgam - 1) * thermo[idx].rho;
+                    thermo[idx].a = sqrt(perfgam * thermo[idx].p / thermo[idx].rho);
                 }
                 else {
-                    thermo[idx] = bilinear_interpolate(density, energy); 
+                    if (using_table == false) {
+                        thermo[idx] = chem.compute_equilibrium_thermodynamic_variables(density, energy);
+                    }
+                    else {
+                        thermo[idx] = bilinear_interpolate(density, energy); 
+                    }
                 }
             }
         }
@@ -2914,6 +2945,7 @@ void Solver2D::writeTecplotDat() {
                 thermo[idx].e = computeInternalEnergy(&U_gathered[idx * n], n_vel);
                 thermo[idx].p = computePressure(&U_gathered[idx * n], perfgam, n_vel);
                 thermo[idx].R = 287.0;
+                thermo[idx].T = thermo[idx].p / (thermo[idx].rho * thermo[idx].R);
                 thermo[idx].cv = 717.0;
                 thermo[idx].gamma = perfgam;
                 thermo[idx].dpdrho = (perfgam - 1) * thermo[idx].e;

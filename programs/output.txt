@@ -1,16 +1,20 @@
 Chemistry initialized
 Starting solve!
-
-job aborted:
-[ranks] message
-
-[0] job terminated by the user
-
-[1-7] terminated
-
----- error analysis -----
-
-[0] on DESKTOP
-ctrl-c was hit. job aborted by the user.
-
----- error analysis -----
+Iteration: 50	 Inner residual: 9.8689e-06	 Outer residual: 7.3735e+04	dt: 5.41144e-07	CFL: 5.000e-01	Elapsed time: 9.608e-01 seconds.
+Iteration: 100	 Inner residual: 1.0566e-05	 Outer residual: 7.9403e+04	dt: 5.41144e-07	CFL: 5.000e-01	Elapsed time: 1.930e+00 seconds.
+Iteration: 150	 Inner residual: 1.1550e-05	 Outer residual: 8.5281e+04	dt: 5.41144e-07	CFL: 5.000e-01	Elapsed time: 2.892e+00 seconds.
+Iteration: 200	 Inner residual: 1.2519e-05	 Outer residual: 9.0212e+04	dt: 5.41144e-07	CFL: 5.000e-01	Elapsed time: 3.854e+00 seconds.
+Iteration: 250	 Inner residual: 1.3316e-05	 Outer residual: 9.3974e+04	dt: 5.41144e-07	CFL: 5.000e-01	Elapsed time: 4.823e+00 seconds.
+Iteration: 300	 Inner residual: 7.9928e-04	 Outer residual: 8.6919e+04	dt: 1.08229e-06	CFL: 1.000e+00	Elapsed time: 5.785e+00 seconds.
+Iteration: 350	 Inner residual: 5.5049e-04	 Outer residual: 7.5044e+04	dt: 1.08229e-06	CFL: 1.000e+00	Elapsed time: 6.744e+00 seconds.
+Iteration: 400	 Inner residual: 1.1307e-01	 Outer residual: 6.2126e+04	dt: 1.08229e-06	CFL: 1.000e+00	Elapsed time: 7.713e+00 seconds.
+Iteration: 450	 Inner residual: 3.5662e-02	 Outer residual: 3.0312e+04	dt: 1.08229e-06	CFL: 1.000e+00	Elapsed time: 8.678e+00 seconds.
+Iteration: 500	 Inner residual: 1.1580e-02	 Outer residual: 1.4758e+04	dt: 1.08229e-06	CFL: 1.000e+00	Elapsed time: 9.647e+00 seconds.
+File created: ../plotfiles/perf_gas_400x200_ramp.dat
+Iteration: 550	 Inner residual: 9.3467e-04	 Outer residual: 2.6827e+03	dt: 1.62343e-06	CFL: 1.500e+00	Elapsed time: 1.074e+01 seconds.
+Iteration: 600	 Inner residual: 5.3626e-05	 Outer residual: 8.4898e+01	dt: 1.62343e-06	CFL: 1.500e+00	Elapsed time: 1.171e+01 seconds.
+Iteration: 650	 Inner residual: 1.4944e-07	 Outer residual: 2.1936e-01	dt: 1.62343e-06	CFL: 1.500e+00	Elapsed time: 1.268e+01 seconds.
+Iteration: 700	 Inner residual: 3.3871e-11	 Outer residual: 5.0434e-05	dt: 1.62343e-06	CFL: 1.500e+00	Elapsed time: 1.367e+01 seconds.
+Solving finished!
+Elapsed time: 1.406e+01 seconds
+File created: ../plotfiles/perf_gas_400x200_ramp.dat

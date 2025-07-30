@@ -109,6 +109,8 @@ private:
     int Nx, Ny, N_cells, N_local;
     int num_cells, num_ifaces, num_jfaces, num_loc_cells, num_gathered_cells; 
     double CFL, dt, t, outer_res, inner_res;
+    Vector CFL_vec;
+    vector<int> CFL_timesteps; 
     string filename;
 
     // CFD data structures
@@ -143,7 +145,7 @@ public:
 
     int rank, size;
 
-    Solver2D(int Nx, int Ny, double CFL, Vector U_inlet, bool real_gas, bool using_table, string filename); 
+    Solver2D(int Nx, int Ny, Vector CFL_vec, vector<int> CFL_timesteps, Vector U_inlet, bool real_gas, bool using_table, string filename); 
 
     void solve();
 

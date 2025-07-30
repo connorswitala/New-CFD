@@ -5,7 +5,6 @@ CXXFLAGS  := -std=c++17 -O2 -Wall -I./linalglib -I./solverlib
 # ==== Directories ====
 LIN_DIR       := linalglib
 GIBBS_DIR	  := gibbslib
-WRITE_DIR	  := writefilelib
 TEST_DIR      := testing
 BUILD_DIR     := build
 PROGRAMS_DIR  := programs
@@ -19,9 +18,6 @@ LIN_OBJ    := $(BUILD_DIR)/linalg.o
 
 GIBBS_SRC	:= $(GIBBS_DIR)/gibbs.cpp
 GIBBS_OBJ	:= $(BUILD_DIR)/gibbs.o
-
-WRITE_SRC	:= $(WRITE_DIR)/writefile.cpp
-WRITE_OBJ	:= $(BUILD_DIR)/writefile.o
 
 SOLVER_SRC := $(SOLVER_DIR)/solver.cpp
 SOLVER_OBJ := $(BUILD_DIR)/solver.o 
@@ -54,9 +50,6 @@ $(LIN_OBJ): $(LIN_SRC) | $(BUILD_DIR)
 
 $(GIBBS_OBJ): $(GIBBS_SRC) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
-
-# $(WRITE_OBJ): $(WRITE_SRC) | $(BUILD_DIR)
-# 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(SOD_OBJ): $(SOD_SRC) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
