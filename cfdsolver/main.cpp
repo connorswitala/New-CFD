@@ -25,9 +25,9 @@ int main(int argc, char* argv[]) {
 
     MPI_Init(&argc, &argv);
 
-    bool modelling_real_gas = true;
+    bool modelling_real_gas = false;
     bool using_bilinear_interpolation = false; 
-    string filename = "../plotfiles/FINAL_real_gas_coupled_400x200_ramp.dat";
+    string filename = "../plotfiles/perf_gas_400x200_ramp.dat";
 
     Solver2D solver(Nx, Ny, CFLs, CFL_timesteps, U_inlet, modelling_real_gas, using_bilinear_interpolation, filename);
     

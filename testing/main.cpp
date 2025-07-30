@@ -4,7 +4,6 @@
 using namespace std;
 
 int main(int argc, char* argv[]) {
-
     
     int Nx = 400, Ny = 200;
 
@@ -28,21 +27,6 @@ int main(int argc, char* argv[]) {
     string filename = "../plotfiles/perf_gas_1000x1000_ramp.dat";
 
     Solver2D solver(Nx, Ny, CFLs, CFL_timesteps, U_inlet, modelling_real_gas, using_bilinear_interpolation, filename);
-    
-    ThermoEntry thermo;
-    thermo = solver.bilinear_interpolate(0.236511, 2.45e6);
-
-    cout << endl << "Thermochemical Variables: " << endl << endl;
-    cout << setw(30) << "Density: " << thermo.rho << " kg/m^3\n";
-    cout << setw(30) << "Internal energy: " << thermo.e << " J/kg\n";
-    cout << setw(30) << "Pressure: " << thermo.p << " Pa\n";
-    cout << setw(30) << "Equilibrium Temperature: " << thermo.T << " K\n";
-    cout << setw(30) << "Mixture Gas Constant R: " << thermo.R << " J/(kg K)\n";
-    cout << setw(30) << "Mixture Specific Heat Cv: " << thermo.cv << " J/(kg K)\n";
-    cout << setw(30) << "Mixture gamma: " << thermo.gamma << '\n';
-    cout << setw(30) << "dp/drho: " << thermo.dpdrho << '\n';
-    cout << setw(30) << "dp/de: " << thermo.dpde << '\n';
-    cout << setw(30) << "Sound speed: " << thermo.a << '\n';
 
  
     MPI_Finalize(); 

@@ -60,6 +60,21 @@ ThermoEntry operator*(const double& s, const ThermoEntry& A) {
 	return result;
 }
 
+double NewtonMethod(double max_dist, int n_points, double d_min) {
+	double k = 1, k_new = 1 / 2, ratio = fabs(k - k_new);
+	double func, func_prime;
+
+	while (ratio >= 0.00000000001) {
+		func = d_min - max_dist * (exp(k / (n_points - 1)) - 1) / (exp(k) - 1);
+		func_prime = -max_dist * (((1 / (n_points - 1) * exp(k / (n_points - 1))) * (exp(k) - 1) - (exp(k / (n_points - 1)) - 1) * exp(k)) / ((exp(k) - 1) * (exp(k) - 1)));
+		k_new = k - func / func_prime;
+		ratio = fabs(k - k_new);
+		k = k_new;
+	}
+
+	return k;
+}
+
 
 /////////////////////////////////////////////////
 //////// Sod Shock Tube Solver Functions ////////
@@ -323,10 +338,9 @@ void SodSolver1D::solve() {
 ////////////////////////////////////
 
 Solver2D::Solver2D(int Nx, int Ny, Vector CFL_vec, vector<int> CFL_timesteps, Vector U_inlet, bool real_gas, bool using_table, string filename) : 
-    Nx(Nx), Ny(Ny), CFL_vec(CFL_vec), CFL_timesteps(CFL_timesteps), U_inlet(U_inlet), real_gas(real_gas), using_table(using_table), filename(filename),
-    BCs(BCType::Inlet, BCType::Outlet, BCType::Symmetry, BCType::Symmetry) {
+    Nx(Nx), Ny(Ny), CFL_vec(CFL_vec), CFL_timesteps(CFL_timesteps), U_inlet(U_inlet), real_gas(real_gas), using_table(using_table), filename(filename) {
     
-
+    
     MPI_Comm_rank(MPI_COMM_WORLD, &rank); 
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
@@ -347,7 +361,10 @@ Solver2D::Solver2D(int Nx, int Ny, Vector CFL_vec, vector<int> CFL_timesteps, Ve
      */
 
 
-    create_ramp_grid(3, 0.75, 20); 
+    // GRID CREATION //
+
+    // create_ramp_grid(3, 0.75, 20); 
+    create_cylinder_grid(0.1, 0.3, 0.45, 0.0001, 3 * pi / 2, pi / 2);    
 
     U_gathered = Vector( num_gathered_cells * n, 0.0); 
     U = Vector((Nx_local + 2) * (Ny + 2) * n, 0.0);  
@@ -457,7 +474,8 @@ Solver2D::Solver2D(int Nx, int Ny, Vector CFL_vec, vector<int> CFL_timesteps, Ve
     if (rank == 0)
         cout << "Chemistry initialized" << endl;
 
-    form_inviscid_boundary_E();   
+    form_inviscid_boundary_E();  
+    
 }
 
 
@@ -1105,6 +1123,233 @@ void Solver2D::create_ramp_grid(double L, double inlet_height, double ramp_angle
                  0, MPI_COMM_WORLD); 
 
 } 
+void Solver2D::create_cylinder_grid(double Cylinder_Radius, double R1, double R2, double d_min, double theta_left, double theta_right) {
+    
+    x_vertices = Vector( (Nx + 1) * (Ny + 1), 0.0),   
+    y_vertices = Vector( (Nx + 1) * (Ny + 1), 0.0),
+    x_cellCenters = Vector(Nx * Ny, 0.0),
+    y_cellCenters = Vector(Nx * Ny, 0.0),
+    iface_xNormals = Vector((Nx + 1) * Ny, 0.0),
+    iface_yNormals = Vector((Nx + 1) * Ny, 0.0),
+    jface_xNormals = Vector(Nx * (Ny + 1), 0.0),
+    jface_yNormals = Vector(Nx * (Ny + 1), 0.0),
+    iAreas = Vector((Nx + 1) * Ny, 0.0),
+    jAreas = Vector(Nx * (Ny + 1), 0.0),
+    cellVolumes = Vector(Nx * Ny, 0.0);
+
+    BCs = BCMap(BCType::Outlet, BCType::Outlet, BCType::Symmetry, BCType::Inlet); 
+
+    if (rank == 0) {
+
+        const int Ntheta = Nx + 1, Nr = Ny + 1;
+        double R_max, k1; 
+
+        Vector theta(Ntheta, 0.0);
+        Vector r(Ntheta * Nr, 0.0); 
+        double dtheta = (theta_right - theta_left) / (Ntheta - 1); 
+
+        for (int i = 0; i < Ntheta; ++i) {
+            r[i * Nr] = Cylinder_Radius;
+            theta[i] = theta_left + i * dtheta;
+        }
+
+        for (int i = 0; i < Ntheta; ++i) {
+            R_max = R1 + (R2 - R1) * cos(theta[i]);
+            k1 = NewtonMethod(R_max, Nr, d_min);
+
+            for (int j = 0; j < Nr; ++j) {
+                r[i * Nr + j] = r[i * Nr] + R_max * ((exp(k1 * j / (Nr - 1)) - 1) / (exp(k1) - 1)); 
+            }
+        }
+
+        for (int i = 0; i < Nx + 1; ++i) {
+            for (int j = 0; j < Ny + 1; ++j) {
+                x_vertices[i * (Ny + 1) + j] = r[i * (Ny + 1) + j] * cos(theta[i]);
+                y_vertices[i * (Ny + 1) + j] = r[i * (Ny + 1) + j] * sin(theta[i]);
+            }
+        }
+    
+
+        Point AB, BC, CD, DA;
+        int i, j;
+
+        // Calculates cell centers and volumes
+        for (i = 0; i < Nx; ++i) {
+            for (j = 0; j < Ny; ++j) {
+
+                int ij = i * (Ny + 1) + j;
+                int iij = (i + 1) * (Ny + 1) + j;   
+                int ijj = i * (Ny + 1) + j + 1; 
+                int iijj = (i + 1) * (Ny + 1) + j + 1;   
+
+                DA = { x_vertices[ij] - x_vertices[ijj], y_vertices[ij] - y_vertices[ijj] }; 
+                AB = { x_vertices[iij] - x_vertices[ij], y_vertices[iij] - y_vertices[ij] };
+                BC = { x_vertices[iijj] - x_vertices[iij], y_vertices[iijj] - y_vertices[iij] };
+                CD = { x_vertices[ijj] - x_vertices[iijj], y_vertices[ijj] - y_vertices[iijj] }; 
+
+                int cell_ij = i * Ny + j;   
+
+                x_cellCenters[cell_ij] = (x_vertices[ij] + x_vertices[iij] + x_vertices[iijj] + x_vertices[ijj]) / 4;
+                y_cellCenters[cell_ij] =	(y_vertices[ij] + y_vertices[iij] + y_vertices[iijj] + y_vertices[ijj]) / 4;
+
+                cellVolumes[cell_ij] = 0.5 * fabs(DA.x * AB.y - DA.y * AB.x) + 0.5 * fabs(BC.x * CD.y - BC.y * CD.x);
+
+                // cout << "xcenter: " << fixed << setprecision(3) << x_cellCenters[cell_ij] 
+                // << "\tycenter: " << fixed << setprecision(3) << y_cellCenters[cell_ij] 
+                // << "\tcell volume: " << fixed << setprecision(3) << cellVolumes[cell_ij] << endl; 
+            }
+        }
+
+        // Calculates geometries for i-faces
+        for (i = 0; i <= Nx; ++i) {
+            for (j = 0; j < Ny; ++j) {
+
+                int ij = i * (Ny + 1) + j;
+                int ijj = i * (Ny + 1) + j + 1;   
+
+                int face_ij = i * Ny + j;  
+
+                AB = { x_vertices[ijj] - x_vertices[ij], y_vertices[ijj] - y_vertices[ij] };
+
+                iAreas[face_ij] = sqrt(AB.x * AB.x + AB.y * AB.y); 
+
+                iface_xNormals[face_ij] = AB.y / fabs(iAreas[face_ij]);
+                iface_yNormals[face_ij] = -AB.x / fabs(iAreas[face_ij]);
+
+                // cout << "i area: " << fixed << setprecision(3) << iAreas[face_ij] 
+                // << "\ti-x norm: " << fixed << setprecision(3) << iface_xNormals[face_ij] 
+                // << "\ti-y norm: " << fixed << setprecision(3) << iface_yNormals[face_ij] << endl;
+            }
+        }
+
+        // Calculates geometries for j-faces
+        for (i = 0; i < Nx; ++i) {
+            for (j = 0; j <= Ny; ++j) {
+
+                int ij = i * (Ny + 1) + j;
+                int iij = (i + 1) * (Ny + 1) + j;  
+
+                CD = { x_vertices[iij] - x_vertices[ij], y_vertices[iij] - y_vertices[ij] };
+
+                int face_ij = i * (Ny + 1) + j;
+
+                jAreas[face_ij] = sqrt(CD.x * CD.x + CD.y * CD.y);
+
+                jface_xNormals[face_ij] = -CD.y / fabs(jAreas[face_ij]);
+                jface_yNormals[face_ij] = CD.x / fabs(jAreas[face_ij]);
+
+
+                // cout << "j area: " << fixed << setprecision(3) <<  jAreas[face_ij] 
+                // << "\tj-x norm: " << fixed << setprecision(3) << jface_xNormals[face_ij] 
+                // << "\tj-y norm: " << fixed << setprecision(3) << jface_yNormals[face_ij] << endl;
+            }
+        }
+    }
+
+    local_Nx = Vector(size);
+    vector<int> cc_sendcounts(size), cc_displacements(size), 
+            if_sendcounts(size), if_displacements(size) , 
+            jf_sendcounts(size), jf_displacements(size);
+
+    int base = Nx / size;
+    int rem = Nx % size;
+
+    for (int r = 0; r < size; ++r) {
+        local_Nx[r] = base + (r < rem ? 1 : 0);
+    }
+
+
+    int cc_offset = 0;
+    if (rank == 0) {
+        for (int r = 0; r < size; ++r) {
+            cc_displacements[r] = cc_offset;
+            cc_sendcounts[r] = local_Nx[r] * Ny;
+            cc_offset += cc_sendcounts[r];
+        }
+    }
+
+    // Broadcast each rank's local_Nx[rank] so they know their size
+    Nx_local = local_Nx[rank]; 
+ 
+    num_ifaces = (Nx_local + 1) * Ny; 
+    num_jfaces = (Ny + 1) * Nx_local; 
+    num_loc_cells = Nx_local * Ny; 
+    num_gathered_cells = Nx * Ny;
+
+    // Scatter cell-centered data
+    xCenter = Vector(num_loc_cells);  
+    MPI_Scatterv(x_cellCenters.data(), cc_sendcounts.data(), cc_displacements.data(), MPI_DOUBLE,
+                 xCenter.data(), num_loc_cells, MPI_DOUBLE,
+                 0, MPI_COMM_WORLD); 
+
+    // Scatter yCenters from grid into new vectors
+    yCenter = Vector(num_loc_cells); 
+    MPI_Scatterv(y_cellCenters.data(), cc_sendcounts.data(), cc_displacements.data(), MPI_DOUBLE,
+                 yCenter.data(), num_loc_cells, MPI_DOUBLE,
+                 0, MPI_COMM_WORLD); 
+
+    // Scatter volumes form grid into new vectors
+    Volume = Vector(num_loc_cells); 
+    MPI_Scatterv(cellVolumes.data(), cc_sendcounts.data(), cc_displacements.data(), MPI_DOUBLE,
+                 Volume.data(), num_loc_cells, MPI_DOUBLE,
+                 0, MPI_COMM_WORLD); 
+
+
+    // For i-faces now
+    if (rank == 0) {
+        int offset = 0;
+        for (int r = 0; r < size; ++r) {
+            if_sendcounts[r] = (local_Nx[r] + 1) * Ny;
+            if_displacements[r] = offset;
+            offset += if_sendcounts[r] - Ny;
+        }
+    }
+
+    // Scatter i-face normals and areas
+    iFxNorm = Vector(num_ifaces, 0.0);
+    MPI_Scatterv(iface_xNormals.data(), if_sendcounts.data(), if_displacements.data(), MPI_DOUBLE,
+                 iFxNorm.data(), num_ifaces, MPI_DOUBLE,
+                 0, MPI_COMM_WORLD); 
+
+    iFyNorm = Vector(num_ifaces, 0.0);
+    MPI_Scatterv(iface_yNormals.data(), if_sendcounts.data(), if_displacements.data(), MPI_DOUBLE,
+                 iFyNorm.data(), num_ifaces, MPI_DOUBLE,
+                 0, MPI_COMM_WORLD); 
+
+    iArea = Vector(num_ifaces, 0.0);
+    MPI_Scatterv(iAreas.data(), if_sendcounts.data(), if_displacements.data(), MPI_DOUBLE,
+                 iArea.data(), num_ifaces, MPI_DOUBLE,
+                 0, MPI_COMM_WORLD);              
+
+
+    // For j-faces now
+    if (rank == 0) {
+        int jface_offset = 0;
+        for (int r = 0; r < size; ++r) {
+            jf_sendcounts[r]    = local_Nx[r] * (Ny + 1); // includes overlap
+            jf_displacements[r] = jface_offset;
+            jface_offset     += local_Nx[r] * (Ny + 1);
+        }
+    }
+
+    // Scatter j-face normals and areas
+    jFxNorm = Vector(num_jfaces, 0.0);
+    MPI_Scatterv(jface_xNormals.data(), jf_sendcounts.data(), jf_displacements.data(), MPI_DOUBLE,
+                 jFxNorm.data(), num_jfaces, MPI_DOUBLE,
+                 0, MPI_COMM_WORLD); 
+
+    jFyNorm = Vector(num_jfaces, 0.0);
+    MPI_Scatterv(jface_yNormals.data(), jf_sendcounts.data(), jf_displacements.data(), MPI_DOUBLE,
+                 jFyNorm.data(), num_jfaces, MPI_DOUBLE,
+                 0, MPI_COMM_WORLD); 
+
+    jArea = Vector(num_jfaces, 0.0);
+    MPI_Scatterv(jAreas.data(), jf_sendcounts.data(), jf_displacements.data(), MPI_DOUBLE,
+                 jArea.data(), num_jfaces, MPI_DOUBLE,
+                 0, MPI_COMM_WORLD); 
+
+}
+
 
 void Solver2D::compute_ifluxes() {
 

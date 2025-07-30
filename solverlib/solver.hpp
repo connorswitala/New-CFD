@@ -48,6 +48,8 @@ void constoprim(const double* U, double* V, double gam, const int dimensions);
 ThermoEntry operator+(const ThermoEntry& A, const ThermoEntry& B);
 ThermoEntry operator*(const double& s, const ThermoEntry& A);
 
+double NewtonMethod(double max_dist, int n_points, double d_min);
+
 inline double computeInternalEnergy(const double* U, int n_vel) {
     double udotu = 0.0;
     for (int i = 0; i < n_vel; ++i) 
@@ -183,6 +185,7 @@ public:
 
     void print_by_rank(Vector Vec, int nx, int ny, int nvars, string name); 
     void create_ramp_grid(double L, double inlet_height, double ramp_angle);
+    void create_cylinder_grid(double Cylinder_Radius, double R1, double R2, double d_min, double theta_left, double theta_right); 
 
     void writeTecplotDat();
     void writeParaviewCSV(); 
