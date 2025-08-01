@@ -104,11 +104,10 @@ public:
 class Solver2D {
 private: 
 
-    int n_vel = 2;
-    int n = 4;
+    int n_vel = 2; // Number of momentum being solved
+    int n = 4;     // Number of conserved variables
 
-    int Nx_local; 
-    int Nx, Ny, N_cells, N_local;
+    int Nx, Ny, Nx_local; 
     int num_cells, num_ifaces, num_jfaces, num_loc_cells, num_gathered_cells; 
     double CFL, dt, t, outer_res, inner_res;
     Vector CFL_vec;
@@ -116,40 +115,42 @@ private:
     string filename;
 
     // CFD data structures
-    Vector U, U_inlet, U_gathered, dU_old, dU_new, iEL, iER, jEB, jET, iFlux, jFlux, iPlus_A, iMinus_A, 
-        jPlus_A, jMinus_A, irho_A, jrho_A, irho_flux, jrho_flux, V, V1, V2, Q, W, int1, int2, int3, UL, UR;
-    Vector local_Nx;
+    Vector local_Nx, U, U_inlet, U_gathered, dU_old, dU_new, iEL, iER, jEB, jET, iFlux, jFlux, iPlus_A, iMinus_A, 
+        jPlus_A, jMinus_A, irho_A, jrho_A, irho_flux, jrho_flux, V, V1, V2, Q, W, int1, int2, int3, UL;
+
+    Vector old_rhos, old_es;
     
     // Thermochemical table data structures
     bool real_gas, using_table;
     vector<ThermoEntry> thermochemical_table;
     vector<ThermoEntry> cell_thermo; 
     Vector internal_energies, densities; 
+
     Chemistry chem;  
-    
-    // Flux calculation data structures
-    Vector Vi, Vii, Vj, Vjj, Vp, Vm, F_plus, F_minus;
+    BCMap BCs; 
+
+    // Intermediate math vectors.
+    Vector Vi, Vii, Vj, Vjj, Vp, Vm, F_plus, F_minus, A, B, C, F, v, g, alpha, rv1, rv2, rm0, rm1, rm2, I;
 
     // Grid data structures per rank
     Vector xCenter, yCenter, Volume, iFxNorm, iFyNorm, jFxNorm, jFyNorm, iArea, jArea;
     
-    // Entire grid data structures
+    // Entire grid data structures only on rank 0
     Vector x_vertices, y_vertices, x_cellCenters, y_cellCenters,
 		iface_xNormals,	iface_yNormals, jface_xNormals, jface_yNormals,
 		iAreas,	jAreas, cellVolumes;
-
-    // Intermediate data structures for math.
-    Vector A, B, C, F, v, g, alpha, rv1, rv2, rm0, rm1, rm2, I; 
-    
-    BCMap BCs; 
 
 public:
 
     int rank, size;
 
     Solver2D(int Nx, int Ny, Vector CFL_vec, vector<int> CFL_timesteps, Vector U_inlet, bool real_gas, bool using_table, string filename); 
-
+    
+    void initialize(); 
+    
     void solve();
+
+
 
     void exchange_U_ghost_cells();
     void exchange_dU_ghost_cells(); 

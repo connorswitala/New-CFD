@@ -6,8 +6,8 @@ int main(int argc, char* argv[]) {
     
     int Nx = 400, Ny = 200;
 
-    vector<int> CFL_timesteps = {0, 250, 500, 750, 1000, 1500, 2000, 2500, 3000};
-    Vector CFLs = {0.5, 1.0, 1.5, 2.0, 5.0, 10.0, 15.0, 20.0, 25.0};
+    vector<int> CFL_timesteps = {0, 1000, 2000, 5000, 10000, 15000};
+    Vector CFLs = {1.0, 2.0, 3.0, 5.0, 10.0, 5.0, 1.0};
 
     double bigG = 1.4;
     double Mach = 20;
@@ -25,13 +25,18 @@ int main(int argc, char* argv[]) {
 
     MPI_Init(&argc, &argv);
 
-    bool modelling_real_gas = false;
+    bool modelling_real_gas = true;
     bool using_bilinear_interpolation = false; 
-    string filename = "../plotfiles/perf_gas_400x200_ramp.dat";
+    string filename = "../plotfiles/perf_gas_400x200_cylinder.csv";
 
     Solver2D solver(Nx, Ny, CFLs, CFL_timesteps, U_inlet, modelling_real_gas, using_bilinear_interpolation, filename);
     
-    solver.solve(); 
+    solver.create_ramp_grid(3, 0.75, 15); 
+    
+    // solver.create_cylinder_grid(0.1, 0.3, 0.45, 0.0001, pi, pi / 2);
+
+    solver.solve();
+
  
     MPI_Finalize(); 
 

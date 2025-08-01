@@ -1,4 +1,12 @@
+Successfully loaded 250000 thermochemical entries.
 Chemistry initialized
-Starting solve!
-Iteration: 50	 Inner residual: 2.7684e-12	 Outer residual: 6.3055e+06	dt: 8.48086e-09	CFL: 5.000e-01	Elapsed time: 4.494e+01 seconds.
-Iteration: 100	 Inner residual: 2.1131e-12	 Outer residual: 5.8000e+06	dt: 8.44086e-09	CFL: 5.000e-01	Elapsed time: 9.060e+01 seconds.
+Printing updates every 245 iterations.
+Starting solve.
+Iteration: 0	 Inner residual: 1.4292e-05	 Outer residual: 2.1477e+04	dt: 3.11158e-06	CFL: 1.000e+00	Elapsed time: 9.074e-02 seconds.
+Iteration: 245	 Inner residual: 1.6042e-05	 Outer residual: 7.7870e+03	dt: 3.11158e-06	CFL: 1.000e+00	Elapsed time: 1.517e+01 seconds.
+Iteration: 490	 Inner residual: 3.4260e-03	 Outer residual: 2.6500e+03	dt: 3.11158e-06	CFL: 1.000e+00	Elapsed time: 3.060e+01 seconds.
+Iteration: 735	 Inner residual: 8.1868e-05	 Outer residual: 1.3591e+02	dt: 3.11158e-06	CFL: 1.000e+00	Elapsed time: 4.648e+01 seconds.
+Solving finished!
+Iteration: 877	 Inner residual: 6.8566e-13	 Outer residual: 9.0929e-07	dt: 3.11158e-06	CFL: 1.000e+00	Elapsed time: 5.536e+01 seconds.
+Writing file...
+CSV file written for ParaView: ../plotfiles/perf_gas_400x200_cylinder.csv
