@@ -106,6 +106,8 @@ private:
 
     int n_vel = 2; // Number of momentum being solved
     int n = 4;     // Number of conserved variables
+    int n_ghosts = 2;
+    int buffers = 2 * n_ghosts;   
 
     int Nx, Ny, Nx_local; 
     int num_cells, num_ifaces, num_jfaces, num_loc_cells, num_gathered_cells; 
@@ -147,7 +149,7 @@ public:
     Solver2D(int Nx, int Ny, Vector CFL_vec, vector<int> CFL_timesteps, Vector U_inlet, bool real_gas, bool using_table, string filename); 
     
     void initialize(); 
-    
+
     void solve();
 
 

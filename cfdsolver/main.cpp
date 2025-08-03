@@ -4,13 +4,13 @@
 int main(int argc, char* argv[]) {
 
     
-    int Nx = 400, Ny = 200;
+    int Nx = 2000, Ny = 1000;
 
     vector<int> CFL_timesteps = {0, 1000, 2000, 5000, 10000, 15000};
     Vector CFLs = {1.0, 2.0, 3.0, 5.0, 10.0, 5.0, 1.0};
 
     double bigG = 1.4;
-    double Mach = 20;
+    double Mach = 2.5;
     double T = 226.15;
     double p = 900;
     double rho = 0.01388;
