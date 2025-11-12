@@ -13,6 +13,9 @@
 constexpr double perfgam = 1.4;
 constexpr double perfR = 287.0;
 
+
+// ============== Structs =================
+
 // This enum class is for setting boundary conditions types
 enum class BCType {
 	IsothermalWall,
@@ -22,6 +25,7 @@ enum class BCType {
 	Symmetry,
 	Undefined
 };
+
 // This struct contains the boundary conditions types for each side of the grid (left, right, bottom, top) 
 struct BCMap {
 
@@ -30,11 +34,11 @@ struct BCMap {
 	BCType bottom;
 	BCType top;
 
-
 	BCMap(BCType left, BCType right, BCType bottom, BCType top) : left(left), right(right), bottom(bottom), top(top) {}
     BCMap() : left(BCType::Undefined), right(BCType::Undefined), bottom(BCType::Undefined), top(BCType::Undefined) {}
 };
 
+// Used in geometry creation
 struct Point {
     double x;
     double y;
@@ -42,14 +46,20 @@ struct Point {
     Point(double x_val = 0.0, double y_val = 0.0) : x(x_val), y(y_val) {};
 };
 
+// Configuration type for setting up 2D solver
+struct Config {
+    bool real_gas;
+    bool interp;
+    string filename;
+    int Nx, Ny;
+    Vector CFLs;
+    vector<int> CFL_timesteps;
+    Vector U_inlet;
+};
+
+// Universal conversion functions
 void primtocons(double* U, const double* V, double gam, const int dimensions);
 void constoprim(const double* U, double* V, double gam, const int dimensions);
-
-ThermoEntry operator+(const ThermoEntry& A, const ThermoEntry& B);
-ThermoEntry operator*(const double& s, const ThermoEntry& A);
-
-double NewtonMethod(double max_dist, int n_points, double d_min);
-
 inline double computeInternalEnergy(const double* U, int n_vel) {
     double udotu = 0.0;
     for (int i = 0; i < n_vel; ++i) 
@@ -72,6 +82,17 @@ inline double compute_total_enthalpy(const double* V, const double gam, int n_ve
     return (V[n_vel + 1] / (gam - 1) + 0.5 * V[0] * udotu + V[n_vel + 1]) / V[0];
 }
 
+// Operator overloads
+ThermoEntry operator+(const ThermoEntry& A, const ThermoEntry& B);
+ThermoEntry operator*(const double& s, const ThermoEntry& A);
+
+// For grid generation
+double NewtonMethod(double max_dist, int n_points, double d_min);
+
+
+// ============== CLASSES ===============
+
+
 class SodSolver1D { 
 private:
 
@@ -93,11 +114,11 @@ public:
     SodSolver1D(int Nx, double CFL);   
 
     void solve();
-    void exchange_ghost_cells(); 
-    void compute_dt();
-    void compute_fluxes(); 
-    void update_U();
-    void write_U_to_csv(string filename);
+    inline void exchange_ghost_cells(); 
+    inline void compute_dt();
+    inline void compute_fluxes(); 
+    inline void update_U();
+    inline void write_U_to_csv(string filename);
 
 };
 
@@ -110,9 +131,15 @@ private:
     int Nx, Ny, Nx_local; 
     int num_cells, num_ifaces, num_jfaces, num_loc_cells, num_gathered_cells; 
     double CFL, dt, t, outer_res, inner_res;
+
+    double de_min, de_max;
+    Vector e_min_old, e_max_old, e_min_new, e_max_new;
+
     Vector CFL_vec;
     vector<int> CFL_timesteps; 
     string filename;
+
+    Vector iterations, de_maxes, dedts, residuals; 
 
     // CFD data structures
     Vector local_Nx, U, U_inlet, U_gathered, dU_old, dU_new, iEL, iER, jEB, jET, iFlux, jFlux, iPlus_A, iMinus_A, 
@@ -144,7 +171,7 @@ public:
 
     int rank, size;
 
-    Solver2D(int Nx, int Ny, Vector CFL_vec, vector<int> CFL_timesteps, Vector U_inlet, bool real_gas, bool using_table, string filename); 
+    Solver2D(Config& cfg); 
     
     void initialize(); 
     
@@ -196,8 +223,4 @@ public:
     void get_perf_chemistry();
     void load_thermochemical_table(); 
     ThermoEntry bilinear_interpolate(double rho, double e);
-
-    bool is_near_inlet_state(const double* U) const;
-
-
 };

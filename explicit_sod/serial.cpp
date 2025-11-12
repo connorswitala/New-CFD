@@ -10,22 +10,31 @@ constexpr double gam = 1.4;
 constexpr double R = 287.0;
 
 
-void primtocons(double* U, const double* V) {
+// Quick function for converting primitive variables to conserved ones
+inline void primtocons(double* U, const double* V) {
     U[0] = V[0];
     U[1] = V[0] * V[1]; 
     U[2] = V[2] / (gam - 1) + 0.5 * V[0] * (V[1] * V[1]); 
 }
-void constoprim(double* V, const double* U) {
+
+// Opposite of above
+inline void constoprim(double* V, const double* U) {
     V[0] = U[0];
     V[1] = U[1] / U[0];
     V[2] = (U[2] - U[0]/2 * (V[1] * V[1])) * (gam - 1);
 }
+
+// compute internal energy from U
 inline double computeInternalEnergy(const double* U) {
     return U[2] / U[0] - 0.5 * (U[1] * U[1] / (U[0] * U[0]));
 }
+
+// compute pressure from U
 inline double computePressure(const double* U) {
     return (U[2] - 0.5 * U[0] * (U[1] * U[1] / (U[0] * U[0]))) * (gam - 1); 
 }
+
+// Write solution to a .csv file
 void write_U_to_csv(const Vector& U, int Nx, const string filename) {
 
 
@@ -49,7 +58,9 @@ void write_U_to_csv(const Vector& U, int Nx, const string filename) {
 
     file.close();
 }
-double compute_max_dt(const std::vector<double>& U, int Nx, double dx, double cfl) {
+
+// Compute maximum dt for simulation
+inline double compute_max_dt(const std::vector<double>& U, int Nx, double dx, double cfl) {
     double min_dt = std::numeric_limits<double>::max();
 
     for (int i = 1; i <= Nx; ++i) { // skip ghost cells
@@ -75,19 +86,15 @@ double compute_max_dt(const std::vector<double>& U, int Nx, double dx, double cf
 }
 
 
-
-int main(int argc, char** argv) {
-
-    // MPI_Init(&argc, &argv);
-    // int rank, size;
-    // MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    // MPI_Comm_size(MPI_COMM_WORLD, &size);
+// Main loop
+int main() {
 
     int counter = 0;
-    const int Nx = 4000;
-    const int n = 3;
+    const int Nx = 10000;
+    const int n = 3;    // Number of equations
     const double CFL = 0.9; 
 
+    // Allocate vectors (flattened 1D)
     Vector A_plus( (Nx + 1) * n * n, 0.0);
     Vector A_minus( (Nx + 1) * n * n, 0.0);
     Vector Flux((Nx + 1) * n, 0.0);
@@ -95,19 +102,18 @@ int main(int argc, char** argv) {
     Vector F_minus((Nx + 1) * n, 0.0); 
     Vector U((Nx + 2) * n, 0.0); 
 
+    // Geometry
     double L = 2.0;
     double S = L / (Nx - 1); 
 
+    // Setup I.C.s
     Vector V(n, 0.0);
     Vector VL = {1.0, 0.0, 1.0};
     Vector VR = {0.125, 0.0, 0.1};
-
     Vector UL(n, 0.0), UR(n, 0.0);
     
     primtocons(UL.data(), VL.data());
     primtocons(UR.data(), VR.data());
-
-
     double t = 0.0;
 
     for (int i = 0; i <= Nx + 1; ++i) {
@@ -117,19 +123,23 @@ int main(int argc, char** argv) {
     }
 
     double dt = compute_max_dt(U, Nx, S, 1.0);;
+
+    // Intermediate calculation vectors
     Vector V1(n, 0.0), V2(n, 0.0), Q(n, 0.0), W(n, 0.0);  
     Vector int1(n * n, 0.0), int2(n * n, 0.0), int3(n * n, 0.0), int4(n * n, 0.0);   
     double rho, u, p, a, lp, lm, l, lc, lt; 
 
 
+    // Begin time loop
     while (t <= 0.5) {
 
+        // B.C.s
         for (int k = 0; k < n; ++k) {
             U[k] = UL[k];              
             U[(Nx + 1) * n + k] = UR[k]; 
         }
 
-
+        // Compute fluxes
         for (int i = 0; i <= Nx; ++i) {
             int idx = i * n; 
             int iidx = (i + 1) * n;
@@ -209,15 +219,14 @@ int main(int argc, char** argv) {
         }
 
 
+        // update U
         for (int i = 0; i <= Nx; ++i) {
-            int fidx = i * n; 
-            int fiidx = (i + 1) * n;
-            int uidx = (i + 1) * n;
+            int idx = i * n; 
+            int iidx = idx + n;
             
             for (int k = 0; k < n; ++k) {
-                U[uidx + k] += -dt / S * (-Flux[fidx + k] + Flux[fiidx + k]); 
+                U[iidx + k] += -dt / S * (-Flux[idx + k] + Flux[iidx + k]); 
             }
-
         }
 
 
@@ -227,8 +236,7 @@ int main(int argc, char** argv) {
         }        
         counter++;
 
-        dt = compute_max_dt(U, Nx, S, CFL);
-
+        dt = compute_max_dt(U, Nx, S, CFL); // Recompute dt
     }
 
     string filename = "sod_shock.csv";   

@@ -1,7 +1,7 @@
 #include "solver.hpp"
 
 
-// Conversion functions
+// Conversion functions that take in conserved vector, primitive vector, gamma, and dimensions (always = 2 for now)
 void primtocons(double* U, const double* V, const double gam, const int dimensions) {
     
     U[0] = V[0]; // Set density
@@ -31,6 +31,7 @@ void constoprim(const double* U, double* V, const double gam, const int dimensio
     V[dimensions + 1] = (U[dimensions + 1] - 0.5 / U[0] * udotu) * (gam - 1); // Set pressure
 }
 
+// Operator overloads for multiplying and adding ThermoEntry types
 ThermoEntry operator+(const ThermoEntry& A, const ThermoEntry& B) {
 	ThermoEntry result;
 	result.rho = A.rho + B.rho;
@@ -60,6 +61,7 @@ ThermoEntry operator*(const double& s, const ThermoEntry& A) {
 	return result;
 }
 
+// Newton method for grid generation
 double NewtonMethod(double max_dist, int n_points, double d_min) {
 	double k = 1, k_new = 1 / 2, ratio = fabs(k - k_new);
 	double func, func_prime;
@@ -76,11 +78,14 @@ double NewtonMethod(double max_dist, int n_points, double d_min) {
 }
 
 
+
+
 /////////////////////////////////////////////////
 //////// Sod Shock Tube Solver Functions ////////
 /////////////////////////////////////////////////
-SodSolver1D::SodSolver1D(int Nx, double CFL) : Nx(Nx), CFL(CFL) {
 
+// Constructor function that takes in NX and CFL, sets I.C.s, creates grid, and allocates storage.
+SodSolver1D::SodSolver1D(int Nx, double CFL) : Nx(Nx), CFL(CFL) {
 
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
@@ -131,11 +136,14 @@ SodSolver1D::SodSolver1D(int Nx, double CFL) : Nx(Nx), CFL(CFL) {
     int2 = Vector(n * n, 0.0);
     int3 = Vector(n * n, 0.0);
 
+    // Scatters to Ranks
     MPI_Scatter(U_gathered.data() + n, Nx_local * n, MPI_DOUBLE,
                 U.data() + n, Nx_local * n, MPI_DOUBLE,
                 0, MPI_COMM_WORLD);
 }
-void SodSolver1D::exchange_ghost_cells() {
+
+// Exchange ghost cells with neighboring ranks
+inline void SodSolver1D::exchange_ghost_cells() {
     MPI_Status status_left, status_right;
 
     // Exchange with left neighbor
@@ -166,7 +174,9 @@ void SodSolver1D::exchange_ghost_cells() {
         }
     }
 }
-void SodSolver1D::compute_dt() { 
+
+// Compute dt
+inline void SodSolver1D::compute_dt() { 
 
     double local_min_dt = std::numeric_limits<double>::max();
 
@@ -194,7 +204,9 @@ void SodSolver1D::compute_dt() {
 
 
 }
-void SodSolver1D::write_U_to_csv(string filename) { 
+
+// Write Solution
+inline void SodSolver1D::write_U_to_csv(string filename) { 
 
 
     ofstream file(filename);
@@ -213,25 +225,32 @@ void SodSolver1D::write_U_to_csv(string filename) {
 
     file.close();
 }
-void SodSolver1D::compute_fluxes() {
+
+// Compute fluxes at each faces
+inline void SodSolver1D::compute_fluxes() {
+
+    int idx, iidx, aidx;
+    double rho, u, p, a, lp, lm, l, lt, lc;
 
     for (int i = 0; i <= Nx_local; ++i) {
-            int idx = i * n;
-            int iidx = (i + 1) * n;
-            int aidx = i * n * n;
+            idx = i * n;
+            iidx = idx + n;
+            aidx = idx * n;
 
-            // Positive flux calculation
+            // ===== Positive flux calculation =====
+
             constoprim(&U[idx], V.data(), perfgam, n_vel);
-            double rho = V[0];
-            double u = V[1];
-            double p = V[2];
-            double a = sqrt(perfgam * p / rho);
+            rho = V[0];
+            u = V[1];
+            p = V[2];
+            a = sqrt(perfgam * p / rho);
 
-            double lp = 0.5 * (u + a + fabs(u + a));
-            double lm = 0.5 * (u - a + fabs(u - a));
-            double l = 0.5 * (u + fabs(u));
-            double lt = 0.5 * (lp - lm);
-            double lc = 0.5 * (lp + lm - 2 * l);
+            // Eigenvalue terms
+            lp = 0.5 * (u + a + fabs(u + a));
+            lm = 0.5 * (u - a + fabs(u - a));
+            l = 0.5 * (u + fabs(u));
+            lt = 0.5 * (lp - lm);
+            lc = 0.5 * (lp + lm - 2 * l);
    
             fill(int1.begin(), int1.end(), 0.0);
             for (int k = 0; k < n; ++k) int1[k * n + k] = l;
@@ -249,7 +268,8 @@ void SodSolver1D::compute_fluxes() {
 
             matvec_mult(&A_plus[aidx], &U[idx], &F_plus[idx], n);
 
-            // Negative flux calculation
+            // ===== Negative flux calculation =====
+
             constoprim(&U[iidx], V.data(), perfgam, n_vel);
             rho = V[0]; 
             u = V[1]; 
@@ -273,16 +293,19 @@ void SodSolver1D::compute_fluxes() {
             outer_product(V1.data(), Q.data(), int2.data(), n);
             outer_product(V2.data(), W.data(), int3.data(), n);
 
-            for (int k = 0; k < n * n; ++k) A_minus[aidx + k] = int1[k] + int2[k] + int3[k];
+            for (int k = 0; k < n * n; ++k) 
+                A_minus[aidx + k] = int1[k] + int2[k] + int3[k];
 
             matvec_mult(&A_minus[aidx], &U[iidx], &F_minus[idx], n);
 
-            // Total flux calculation
+            // ===== Total flux calculation =====
             for (int k = 0; k < n; ++k) 
                 Flux[idx + k] = F_plus[idx + k] + F_minus[idx + k];
     }
 }
-void SodSolver1D::update_U() {
+
+// Update U
+inline void SodSolver1D::update_U() {
     for (int i = 0; i < Nx_local; ++i) {
             int idx = (i + 1) * n;
             int fidx = i * n;
@@ -292,6 +315,8 @@ void SodSolver1D::update_U() {
             }
     }
 }
+
+// Time loop that contains everything
 void SodSolver1D::solve() {
     
     int counter = 0;
@@ -304,21 +329,12 @@ void SodSolver1D::solve() {
         compute_fluxes();      
         update_U();
 
-        // std::cout << "Rank " << rank << " U = [";
-        // for (int i = 0; i < (Nx_local + 2) * n; ++i) {
-        //     std::cout << U[i];
-        //     if (i != (Nx_local + 2) * n - 1) std::cout << ", ";
-        // }
-        // std::cout << "]\n";
-        // std::cout.flush();
-
         t += dt; 
 
         if (counter % 100 == 0 && rank == 0) {
             cout << "t = " << t << "\tdt = " << dt << std::endl;
         }
         counter++;
-
     }
 
     MPI_Gather(U.data() + n, Nx_local * n, MPI_DOUBLE,
@@ -333,19 +349,29 @@ void SodSolver1D::solve() {
 }
 
 
+
+
 ////////////////////////////////////
 //////// Solver2D Functions ////////
 ////////////////////////////////////
 
-Solver2D::Solver2D(int Nx, int Ny, Vector CFL_vec, vector<int> CFL_timesteps, Vector U_inlet, bool real_gas, bool using_table, string filename) : 
-    Nx(Nx), Ny(Ny), CFL_vec(CFL_vec), CFL_timesteps(CFL_timesteps), U_inlet(U_inlet), real_gas(real_gas), using_table(using_table), filename(filename) {
+// Constructor function.
+Solver2D::Solver2D(Config& cfg) {
     
+        Nx = cfg.Nx;
+        Ny = cfg.Ny;
+        CFL_vec = cfg.CFLs;
+        CFL_timesteps = cfg.CFL_timesteps;
+        U_inlet = cfg.U_inlet;
+        real_gas = cfg.real_gas;
+        using_table = cfg.interp;
+        filename = cfg.filename;
     
     MPI_Comm_rank(MPI_COMM_WORLD, &rank); 
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-
 }
 
+// I.C.s and allocation of vectors
 void Solver2D::initialize() {
     t = 0.0; 
     inner_res = 1.0;
@@ -483,6 +509,7 @@ void Solver2D::initialize() {
  * global boundaries. The E matrices are taken care of at the constructor since they only need to be made once. 
  */
 
+// Set cell boundary conditions at edges of grid
 void Solver2D::form_inviscid_boundary_U() {
     Vector Uholder(n, 0.0); 
 
@@ -538,6 +565,8 @@ void Solver2D::form_inviscid_boundary_U() {
     }
 
 }
+
+// Given cell's BCType and state, compute ghost cell U
 Vector Solver2D::get_U_values(BCType type, double* U_inner, double x_norm, double y_norm) {
     
     Vector ghost(n , 0.0); 
@@ -594,6 +623,8 @@ Vector Solver2D::get_U_values(BCType type, double* U_inner, double x_norm, doubl
         throw invalid_argument("Unknown boundary condition type.");
     }
 }
+
+// Forms E matrices used for boundary condition. Only called one in initializer function since values never change.
 void Solver2D::form_inviscid_boundary_E() {
 
     Vector Eholder(n * n, 0.0);
@@ -634,6 +665,8 @@ void Solver2D::form_inviscid_boundary_E() {
      
     }
 }
+
+// Given cell's BCType, return E matrix
 Vector Solver2D::get_E_values(BCType type, double x_norm, double y_norm) {
 
     Vector holder =     {1, 0, 0, 0,
@@ -663,6 +696,8 @@ Vector Solver2D::get_E_values(BCType type, double x_norm, double y_norm) {
         throw invalid_argument("Unknown boundary condition type.");        
     }
 }
+
+// MPI exchange information and update physical boundary conditions
 void Solver2D::exchange_U_ghost_cells() {
     MPI_Status status_left, status_right;
 
@@ -743,6 +778,8 @@ void Solver2D::exchange_U_ghost_cells() {
 
     form_inviscid_boundary_U(); 
 }
+
+// MPI Exhange dU updates
 void Solver2D::exchange_dU_ghost_cells() {
      MPI_Status status_left, status_right;
 
@@ -798,23 +835,25 @@ void Solver2D::exchange_dU_ghost_cells() {
 
 }
 
+
+/**
+ * ========== Solver function ============
+ */
+
 void Solver2D::solve() {
 
     initialize();
 
-    double start_time = MPI_Wtime();
-
-    double func = 100 * exp(- (Nx * Ny) * 3e-6) * log(size) + 10;
-    if (real_gas) func /= 5;
-    if (rank == 0) 
-        cout << "Printing updates every " << int(func) << " iterations." << endl << "Starting solve." << endl;
+    double start_time = MPI_Wtime(); // MPI timer
 
     int counter = 0;   
-    int num = 0; 
+    int num = 0;     
 
+    // Time loop
     while (outer_res > 1e-6) {
 
-        if (counter == CFL_timesteps[num]) {
+        // Change CFL
+        if (CFL_timesteps[num] == counter) {
             CFL = CFL_vec[num];
             num++;
         }
@@ -840,8 +879,6 @@ void Solver2D::solve() {
             perf_line_relaxation();
         }
 
-        // explicit_update();
-
         update_U(); 
 
         if (real_gas) {
@@ -851,23 +888,22 @@ void Solver2D::solve() {
             compute_outer_res_perf();
         }
 
-        if (counter % int(func) == 0) {
+        if (counter % 10 == 0) {
             double end_time = MPI_Wtime();
             if (rank == 0) { 
                 cout << "Iteration: " << counter
-                << "\t Inner residual: " << fixed << scientific << setprecision(4) << inner_res
                 << "\t Outer residual: " << fixed << scientific << setprecision(4) << outer_res
                 << "\tdt: " << fixed << scientific << setprecision(5) << dt 
-                << "\tCFL: " << fixed << scientific << setprecision(3) << CFL 
+                << "\tCFL: " << fixed << setprecision(3) << CFL
                 << "\tElapsed time: " << end_time - start_time << " seconds." << endl;
             }
         }        
 
-        counter++; 
-
-        if (counter % (5 * int(func)) == 0)
+        if (counter % 250 == 0) {
             finalize();
+        }
 
+        counter++; 
     }    
 
     double end_time = MPI_Wtime();
@@ -886,6 +922,8 @@ void Solver2D::solve() {
 
 }
 
+
+// Creates a Ramp Grid and distributes to ranks.
 void Solver2D::create_ramp_grid(double L, double inlet_height, double ramp_angle) {
 
     x_vertices = Vector( (Nx + 1) * (Ny + 1), 0.0),   
@@ -1133,6 +1171,8 @@ void Solver2D::create_ramp_grid(double L, double inlet_height, double ramp_angle
                  0, MPI_COMM_WORLD); 
 
 } 
+
+// Creates a Ramp Grid and distributes to ranks.
 void Solver2D::create_cylinder_grid(double Cylinder_Radius, double R1, double R2, double d_min, double theta_left, double theta_right) {
     
     x_vertices = Vector( (Nx + 1) * (Ny + 1), 0.0);   
@@ -1360,6 +1400,7 @@ void Solver2D::create_cylinder_grid(double Cylinder_Radius, double R1, double R2
 
 } 
 
+// Computes i-face fluxes
 void Solver2D::compute_ifluxes() {
     int ci, cii, fi; 
     double weight, pi, pii, dp, nx, ny, rho, u, v, p, ho, uprime, a, lp, lm, l, lt, lc;  
@@ -1502,6 +1543,8 @@ void Solver2D::compute_ifluxes() {
         }
     }
 }
+
+// Computes j-face fluxes
 void Solver2D::compute_jfluxes() {
 
     int cj, cjj, fj; 
@@ -1646,6 +1689,7 @@ void Solver2D::compute_jfluxes() {
     }
 }
 
+// perfect gas DPLR functions
 void Solver2D::perf_line_relaxation() {
     int in_counter = 0;
 
@@ -2087,6 +2131,7 @@ void Solver2D::relax_right_line_perf() {
 
 }
 
+// Real gas DPLR relaxation
 void Solver2D::real_line_relaxation() {
     int in_counter = 0;
 
@@ -2641,6 +2686,7 @@ void Solver2D::relax_right_line_real() {
     }
 }
 
+// Update U and dt functions
 void Solver2D::update_U() {
 
     for (int i = 1; i < Nx_local + 1; ++i) {
@@ -2653,7 +2699,6 @@ void Solver2D::update_U() {
     }
 
 }
-
 void Solver2D::compute_dt() {
     Vector V(4); 
     double c, max_new = 0.0, max_old = 0.0, sidesum, l, r, b, t;
@@ -2672,7 +2717,6 @@ void Solver2D::compute_dt() {
 
             max_new = sidesum/(2 * Volume[i * Ny + j]);
             if (max_new >= max_old) max_old = max_new;
-
         }
     }
 
@@ -2683,8 +2727,10 @@ void Solver2D::compute_dt() {
     MPI_Allreduce(&dt_local, &dt_global, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD); 
 
     dt = CFL/dt_global; 
-
 }
+
+
+// Residual calculations
 void Solver2D::compute_inner_res_perf() {
 
     Vector X(n, 0.0), Y(n, 0.0), Z(n, 0.0), ID = {1, 0, 0, 0}; 
@@ -2833,6 +2879,7 @@ void Solver2D::compute_outer_res_real() {
     outer_res = sqrt(outer_res); 
 }
 
+// Explicit update (can be swapped out for line relaxtion in solve() function)
 void Solver2D::explicit_update() {
 
 
@@ -2855,6 +2902,7 @@ void Solver2D::explicit_update() {
     }
 }
 
+// Print some vector for each rank
 void Solver2D::print_by_rank(Vector Vec, int nx, int ny, int nvars, string name){
 
     for (int r = 0; r < size; ++r) {
@@ -2882,6 +2930,8 @@ void Solver2D::print_by_rank(Vector Vec, int nx, int ny, int nvars, string name)
     }
 
 }
+
+// Save results to file
 void Solver2D::finalize() {
 
     Vector U_sendbuf(Nx_local * Ny * n, 0.0);
@@ -2914,6 +2964,7 @@ void Solver2D::finalize() {
     writeParaviewCSV(); 
 }
 
+// Thermodynamic state functions
 void Solver2D::load_thermochemical_table() {
     const int N = 500;
 
@@ -3155,7 +3206,7 @@ void Solver2D::get_perf_chemistry() {
     }
 }
 
-
+// Plotting function
 void Solver2D::writeTecplotDat() {
     if (rank != 0) return;
 
